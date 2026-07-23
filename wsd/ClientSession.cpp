@@ -44,6 +44,9 @@
 #if !MOBILEAPP || defined(QTAPP) || defined(MACOSAPP) || defined(_WIN32)
 #include <wsd/AIChatSession.hpp>
 #endif
+#if !MOBILEAPP
+#include <wsd/HostUtil.hpp>
+#endif
 #include <wsd/TileDesc.hpp>
 
 #include <common/base64.hpp>
@@ -68,6 +71,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <algorithm>
 
 using namespace COOLProtocol;
 
@@ -1580,8 +1584,25 @@ bool ClientSession::_handleInput(const char *buffer, int length)
         }
     }
 #endif
-    else if (tokens.equals(0, "executescript") ||
-             tokens.equals(0, "proxyreturn"))
+    else if (tokens.equals(0, "pythonexecute"))
+    {
+        // Debug/wire-test kick only — not a product UI API. Formula path is
+        // AddIn → pythoncompute:. Client-chosen ids must not collide with py-*.
+#if !ENABLE_DEBUG
+        sendTextFrameAndLogError("error: cmd=pythonexecute kind=disabled");
+        return false;
+#else
+        if (!isWritable())
+        {
+            sendTextFrameAndLogError("error: cmd=pythonexecute kind=readonly");
+            return false;
+        }
+        // Let the broker return its normal structured disabled response; this
+        // keeps the debug command useful for end-to-end enable/disable tests.
+        return forwardToChild(std::string(buffer, length), docBroker);
+#endif
+    }
+    else if (tokens.equals(0, "executescript") || tokens.equals(0, "proxyreturn"))
     {
         return forwardToChild(std::string(buffer, length), docBroker);
     }
@@ -2913,6 +2934,19 @@ bool ClientSession::handleKitToClientMessage(const std::shared_ptr<Message>& pay
             LOG_WRN("Expected json unocommandresult. Ignoring: " << firstLine);
         }
     }
+#if !MOBILEAPP
+    else if (tokens.equals(0, "pythoncompute:"))
+    {
+        // Kit asks coolwsd to POST; do not forward the raw request to the browser.
+        return handlePythonComputeFromKit(payload);
+    }
+#else
+    else if (tokens.equals(0, "pythoncompute:"))
+    {
+        LOG_WRN("pythoncompute: ignored on MOBILEAPP (no broker)");
+        return true; // swallow — do not forward to client
+    }
+#endif
     else if (tokens.equals(0, "error:"))
     {
         std::string errorCommand;
@@ -3709,6 +3743,207 @@ void ClientSession::abortConversion(const std::shared_ptr<DocumentBroker>& docBr
 }
 
 #if !MOBILEAPP
+bool ClientSession::handlePythonComputeFromKit(const std::shared_ptr<Message>& payload)
+{
+    // Thin broker: kit cannot reach the network from the jail. coolwsd POSTs
+    // dumb JSON to the admin-configured Python compute service (same http::Session
+    // pattern as AIChatSession::callLLMAPI). No split_grid / NumPy in C++.
+    // Optional Bearer auth via security.python_compute.api_key; admin timeout_secs
+    // clamps the HTTP wait. No automatic retries — formula POSTs are not idempotent.
+    //
+    // Future hardening (see writeragent docs/numpy-jailsafe.md):
+    // - Cap request/response bytes and per-doc in-flight POSTs (see AI chat limits).
+    // - Cancel in-flight POST on disconnect.
+    const std::shared_ptr<DocumentBroker> docBroker = _docBroker.lock();
+    if (!docBroker)
+    {
+        LOG_ERR("No DocBroker for pythoncompute request");
+        return false;
+    }
+
+    std::string json = payload->jsonString();
+    if (json.empty())
+    {
+        // Message::jsonString only returns when token[1] starts with {/[ —
+        // strip the fixed prefix as a fallback.
+        constexpr std::string_view prefix("pythoncompute:");
+        const std::string& firstLine = payload->firstLine();
+        if (firstLine.size() > prefix.size())
+            json = Util::trimmed(firstLine.substr(prefix.size()));
+    }
+
+    // Lifetime-safe reply path: do not capture raw `this` across async HTTP.
+    const std::weak_ptr<MessageHandlerInterface> selfWeak = weak_from_this();
+    auto replyToKit = [selfWeak, docBroker](const std::string& body)
+    {
+        auto selfLifecycle = selfWeak.lock();
+        if (!selfLifecycle)
+        {
+            LOG_WRN_S("Python compute: session gone before reply to kit");
+            return;
+        }
+        auto session = std::static_pointer_cast<ClientSession>(selfLifecycle);
+        docBroker->forwardToChild(session, "pythoncomputeresult: " + body);
+    };
+
+    auto replyError = [replyToKit](const std::string& requestId, const std::string& error)
+    {
+        Poco::JSON::Object::Ptr obj = new Poco::JSON::Object();
+        if (!requestId.empty())
+            obj->set("id", requestId);
+        obj->set("status", "error");
+        obj->set("error", error);
+        std::ostringstream oss;
+        obj->stringify(oss);
+        replyToKit(oss.str());
+    };
+
+    if (json.empty())
+    {
+        LOG_WRN("Python compute: empty upward frame (no JSON payload)");
+        replyError({}, "Python compute request is empty");
+        return true;
+    }
+
+    Poco::JSON::Object::Ptr reqObj;
+    std::string requestId;
+    if (JsonUtil::parseJSON(json, reqObj) && reqObj)
+        JsonUtil::findJSONValue(reqObj, "id", requestId);
+
+    // AddIn + kit pythonexecute already send valid JSON with id. Bail only to
+    // avoid dereferencing reqObj (timeout_ms) / POSTing garbage on a corrupt frame.
+    if (!reqObj)
+    {
+        LOG_WRN("Python compute: corrupt upward frame bytes=" << json.size());
+        replyError({}, "Python compute request is invalid JSON");
+        return true;
+    }
+
+    if (!ConfigUtil::getConfigValue<bool>("security.python_compute.enable", false))
+    {
+        LOG_INF("Python compute: disabled; rejecting id=[" << requestId << ']');
+        replyError(requestId, "Python compute is disabled");
+        return true;
+    }
+
+    const std::string url = ConfigUtil::getConfigValue<std::string>(
+        "security.python_compute.url", "http://localhost:8000/v1/execute");
+    if (url.empty())
+    {
+        LOG_WRN("Python compute: url empty; rejecting id=[" << requestId << ']');
+        replyError(requestId, "python_compute.url is empty");
+        return true;
+    }
+
+    Poco::URI uri(url);
+    if (HostUtil::isForbiddenKitHost(uri.getHost()))
+    {
+        LOG_WRN("Rejected python compute request to host not in KIT allowlist ["
+                << Anonymizer::anonymizeUrl(url) << ']');
+        replyError(requestId, "Target host \"" + uri.getHost() +
+                                   "\" is not in the allowed host list, contact your administrator");
+        return true;
+    }
+
+    // Admin timeout_secs is the base; client timeout_ms may raise it (+cushion).
+    // Hard cap 620s. Intentionally no HTTP retries (non-idempotent formula exec).
+    int timeoutSec = ConfigUtil::getConfigValue<int>("security.python_compute.timeout_secs", 60);
+    if (timeoutSec <= 0)
+        timeoutSec = 60;
+    int timeoutMs = 0;
+    if (JsonUtil::findJSONValue(reqObj, "timeout_ms", timeoutMs) && timeoutMs > 0)
+        timeoutSec = std::max(timeoutSec, std::max(5, (timeoutMs + 999) / 1000 + 5));
+    timeoutSec = std::min(timeoutSec, 620);
+
+    std::shared_ptr<http::Session> httpSession = http::Session::create(url);
+    if (!httpSession)
+    {
+        LOG_ERR("Python compute: failed to create HTTP session id=[" << requestId << ']');
+        replyError(requestId, "Failed to create HTTP session");
+        return true;
+    }
+
+    httpSession->setTimeout(std::chrono::seconds(timeoutSec));
+
+    httpSession->setFinishedHandler(
+        [requestId, replyToKit, replyError](const std::shared_ptr<http::Session>& session)
+        {
+            // Use LOG_*_S — plain LOG_* needs Session::logPrefix / `this`.
+            const std::shared_ptr<const http::Response> response = session->response();
+            if (!response)
+            {
+                LOG_WRN_S("Python compute: timeout id=[" << requestId << ']');
+                replyError(requestId, "Request timeout");
+                return;
+            }
+
+            const int statusCode = static_cast<int>(response->statusLine().statusCode());
+            std::string body = response->getBody();
+            LOG_INF_S("Python compute: HTTP " << statusCode << " id=[" << requestId
+                                              << "] bodyBytes=" << body.size());
+            if (statusCode != 200)
+            {
+                // Prefer service JSON error if present; else wrap HTTP status.
+                Poco::JSON::Object::Ptr errObj;
+                if (!JsonUtil::parseJSON(body, errObj) || !errObj)
+                {
+                    replyError(requestId, "Python compute HTTP " + std::to_string(statusCode));
+                    return;
+                }
+                // Always stamp originating upward-frame id — never trust service.
+                if (!requestId.empty())
+                    errObj->set("id", requestId);
+                if (!errObj->has("status"))
+                    errObj->set("status", "error");
+                std::ostringstream oss;
+                errObj->stringify(oss);
+                replyToKit(oss.str());
+                return;
+            }
+
+            Poco::JSON::Object::Ptr resultObj;
+            if (!JsonUtil::parseJSON(body, resultObj) || !resultObj)
+            {
+                LOG_WRN_S("Python compute: non-JSON body id=[" << requestId << ']');
+                replyError(requestId, "Python compute returned non-JSON body");
+                return;
+            }
+            // Always stamp originating upward-frame id — never trust service.
+            if (!requestId.empty())
+                resultObj->set("id", requestId);
+
+            std::ostringstream oss;
+            resultObj->stringify(oss);
+            LOG_DBG_S("Python compute: forwarding result to kit id=[" << requestId << ']');
+            replyToKit(oss.str());
+        });
+
+    httpSession->setConnectFailHandler(
+        [requestId, replyError = std::move(replyError)](const std::shared_ptr<http::Session>&)
+        {
+            LOG_WRN_S("Python compute: network error id=[" << requestId << ']');
+            replyError(requestId, "Network error reaching Python compute service");
+        });
+
+    http::Request httpRequest(uri.getPathAndQuery());
+    httpRequest.setVerb(http::Request::VERB_POST);
+    httpRequest.set("Content-Type", "application/json");
+    // Send Bearer only when a key is set; a keyless self-hosted endpoint gets
+    // no Authorization header rather than a bare "Bearer ".
+    const std::string apiKey =
+        ConfigUtil::getConfigValue<std::string>("security.python_compute.api_key", "");
+    if (!apiKey.empty())
+        httpRequest.set("Authorization", "Bearer " + apiKey);
+    httpRequest.setBody(std::move(json), "application/json");
+
+    LOG_INF("Python compute: POST id=[" << requestId << "] timeoutSec=" << timeoutSec
+                                        << " auth=" << (apiKey.empty() ? "no" : "yes") << " to "
+                                        << Anonymizer::anonymizeUrl(url));
+    // Single attempt — no retries (formula execution is not idempotent).
+    httpSession->asyncRequest(httpRequest, docBroker->getPoll());
+    return true;
+}
+
 bool ClientSession::handleSaveAs(const std::shared_ptr<Message>& payload,
                                  const std::shared_ptr<DocumentBroker>& docBroker,
                                  const std::shared_ptr<StreamSocket>& saveAsSocket)

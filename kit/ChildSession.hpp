@@ -231,6 +231,10 @@ private:
     bool getPresentationInfo();
     bool executeScript(char const * buffer, int length, StringVector const & tokens);
     bool proxyReturn(char const * buffer, int length);
+    /// Test/kick path: accept pythonexecute <json>, raise pythoncompute: to coolwsd.
+    bool requestPythonCompute(char const* buffer, int length, const StringVector& tokens);
+    /// Result from coolwsd after HTTP POST; finish the matching AddIn volatile.
+    bool handlePythonComputeResult(char const* buffer, int length);
     bool getSlideSections();
 
     void rememberEventsForInactiveUser(int type, const std::string& payload);

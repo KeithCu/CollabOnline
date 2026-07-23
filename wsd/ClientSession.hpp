@@ -495,6 +495,11 @@ private:
     bool handleSaveAs(const std::shared_ptr<Message>& payload,
                       const std::shared_ptr<DocumentBroker>& docBroker,
                       const std::shared_ptr<StreamSocket>& saveAsSocket);
+
+    /// Kit-initiated Python compute: POST dumb JSON to security.python_compute.url
+    /// via http::Session (same egress shape as AIChatSession::callLLMAPI), then
+    /// forward pythoncomputeresult: back to kit. No packing/NumPy in C++.
+    bool handlePythonComputeFromKit(const std::shared_ptr<Message>& payload);
 #endif // !MOBILEAPP
 
 private:

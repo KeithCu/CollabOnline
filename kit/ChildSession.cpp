@@ -35,6 +35,7 @@
 #include <common/Util.hpp>
 #include <common/base64.hpp>
 #include <kit/KitHelper.hpp>
+#include <kit/PythonComputeEmitter.hpp>
 #include <kit/SlideCompressor.hpp>
 
 #define KIT_USE_UNSTABLE_API
@@ -65,6 +66,7 @@
 #endif
 
 #include <cassert>
+#include <chrono>
 #include <climits>
 #include <fstream>
 #include <sstream>
@@ -140,6 +142,7 @@ ChildSession::ChildSession(const std::shared_ptr<ProtocolHandlerInterface>& prot
 ChildSession::~ChildSession()
 {
     LOG_INF("~ChildSession dtor [" << getName() << ']');
+    pythoncompute::clearEmitter(this);
     disconnect();
 
     if (_hasURP)
@@ -297,6 +300,15 @@ bool ChildSession::_handleInput(const char *buffer, int length)
     {
         // Just to update the activity of a view-only client.
         return true;
+    }
+    else if (tokens.equals(0, "pythonexecute"))
+    {
+        // Independent of document load — used for wire tests before =PY() lands.
+        return requestPythonCompute(buffer, length, tokens);
+    }
+    else if (tokens.equals(0, "pythoncomputeresult:"))
+    {
+        return handlePythonComputeResult(buffer, length);
     }
     else if (tokens.equals(0, "commandvalues"))
     {
@@ -1111,6 +1123,11 @@ bool ChildSession::loadDocument(const StringVector& tokens)
     LOG_INF("Created new view with viewid: [" << _viewId << "] for username: ["
                                               << getUserNameAnonym() << "] in session: [" << getId()
                                               << "], template: [" << getDocTemplate() << ']');
+
+    // Install before status/view notify so on-load =PY() recalc can emit.
+    // Spreadsheet only; no-op on MOBILEAPP (emitter). clearEmitter in dtor covers later failures.
+    if (getLOKitDocument()->getDocumentType() == KIT_DOCTYPE_SPREADSHEET)
+        pythoncompute::installEmitter(this);
 
     if (!getDocTemplate().empty())
     {
@@ -3582,6 +3599,100 @@ bool ChildSession::proxyReturn(char const * buffer, int length) {
     std::string const jsonValue(full.substr(idEnd + 1));
     _docManager->getLOKit()->deliverProxyResult(callId.c_str(), jsonValue.c_str());
     return true;
+}
+
+bool ChildSession::requestPythonCompute(char const* buffer, int length, const StringVector& tokens)
+{
+    // Wire: "pythonexecute <json>" — kit asks coolwsd to POST dumb JSON.
+    // C++ never packs grids; the service returns scalars/lists/null.
+    if (tokens.size() < 2)
+    {
+        sendTextFrameAndLogError("error: cmd=pythonexecute kind=syntax");
+        return false;
+    }
+
+    std::string_view full(buffer, length);
+    constexpr std::string_view prefix("pythonexecute ");
+    if (!full.starts_with(prefix) || full.size() <= prefix.size())
+    {
+        sendTextFrameAndLogError("error: cmd=pythonexecute kind=syntax");
+        return false;
+    }
+
+    std::string json(Util::trimmed(full.substr(prefix.size())));
+    Poco::JSON::Object::Ptr reqObj;
+    if (!JsonUtil::parseJSON(json, reqObj) || !reqObj)
+    {
+        sendTextFrameAndLogError("error: cmd=pythonexecute kind=invalidjson");
+        return false;
+    }
+
+    std::string requestId;
+    JsonUtil::findJSONValue(reqObj, "id", requestId);
+    if (requestId.empty())
+    {
+        sendTextFrameAndLogError("error: cmd=pythonexecute kind=missingid");
+        return false;
+    }
+    // Never collide with AddIn-minted py-* pending slots.
+    if (requestId.starts_with("py-"))
+    {
+        sendTextFrameAndLogError("error: cmd=pythonexecute kind=reservedid");
+        return false;
+    }
+
+    if (!reqObj->has("code"))
+    {
+        sendTextFrameAndLogError("error: cmd=pythonexecute kind=missingcode");
+        return false;
+    }
+
+    LOG_INF("Python compute request id=[" << requestId << "] bytes=" << json.size());
+    return sendTextFrame("pythoncompute: " + json);
+}
+
+bool ChildSession::handlePythonComputeResult(char const* buffer, int length)
+{
+    // Finish XVolatileResult registered by the Calc =PY() AddIn (interim "#BUSY!").
+    std::string_view full(buffer, length);
+    constexpr std::string_view prefix("pythoncomputeresult:");
+    std::string json;
+    if (full.starts_with(prefix))
+        json = Util::trimmed(full.substr(prefix.size()));
+    else
+        json.assign(buffer, length);
+
+    Poco::JSON::Object::Ptr resultObj;
+    if (!JsonUtil::parseJSON(json, resultObj) || !resultObj)
+    {
+        LOG_WRN("pythoncomputeresult: invalid JSON (" << json.size() << " bytes)");
+        sendTextFrameAndLogError("error: cmd=pythoncomputeresult kind=invalidjson");
+        return false;
+    }
+
+    std::string status;
+    std::string requestId;
+    JsonUtil::findJSONValue(resultObj, "status", status);
+    JsonUtil::findJSONValue(resultObj, "id", requestId);
+    LOG_INF("Python compute result id=[" << requestId << "] status=[" << status
+                                         << "] bytes=" << json.size());
+
+    if (pythoncompute::completeFromJson(json))
+    {
+        LOG_INF("Python compute result id=[" << requestId
+                                             << "] delivered to AddIn complete_json");
+        return true;
+    }
+
+    LOG_WRN("Python compute result id=[" << requestId
+                                         << "] complete_json missed (AddIn lib not mapped?)");
+#if ENABLE_DEBUG
+    // Wire debugging only — never echo results to the browser in product builds.
+    return sendTextFrame("pythoncomputeresult: " + json);
+#else
+    sendTextFrameAndLogError("error: cmd=pythoncomputeresult kind=nolib");
+    return false;
+#endif
 }
 
 bool ChildSession::getSlideSections()

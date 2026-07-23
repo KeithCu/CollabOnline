@@ -246,6 +246,7 @@ $(eval $(call gb_Helper_register_libraries_for_install,OOOLIBS,calc, \
 	$(call gb_Helper_optional,DBCONNECTIVITY,calc) \
 	date \
 	pricing \
+	pythoncompute \
 	sc \
 	scd \
 	scfilt \

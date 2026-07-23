@@ -115,6 +115,7 @@ gb_MERGE_LIBRARY_LIST := \
 	passwordcontainer \
 	pdffilter \
 	pricing \
+	pythoncompute \
 	$(call gb_Helper_optional,SCRIPTING,protocolhandler) \
 	reg \
 	salhelper \

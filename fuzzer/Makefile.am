@@ -103,7 +103,8 @@ coolforkit_sources = \
                      ../kit/ChildSession.cpp \
                      ../kit/ForKit.cpp \
                      ../kit/Kit.cpp \
-                     ../kit/KitWebSocket.cpp
+                     ../kit/KitWebSocket.cpp \
+                     ../kit/PythonComputeEmitter.cpp
 
 common_fuzzer_sources = \
                        Common.cpp \
