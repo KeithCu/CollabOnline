@@ -36,7 +36,7 @@ namespace connectivity
     {
         ::osl::Mutex                                          m_aMutex;
         css::uno::Reference< css::uno::XComponentContext >    m_xContext;
-        css::uno::WeakReference< css::sdbc::XConnection >     m_xConnection;
+        cpo::uno::WeakReference< css::sdbc::XConnection >     m_xConnection;
 
         ParameterSubstitution( const ParameterSubstitution& ) = delete;
         ParameterSubstitution& operator=( const ParameterSubstitution& ) = delete;
@@ -45,16 +45,16 @@ namespace connectivity
     private:
 
         // XServiceInfo
-        virtual OUString SAL_CALL getImplementationName(  ) override;
-        virtual bool SAL_CALL supportsService( const OUString& ServiceName ) override;
-        virtual cpo::uno::Sequence< OUString > SAL_CALL getSupportedServiceNames(  ) override;
+        virtual OUString getImplementationName(  ) override;
+        virtual bool supportsService( const OUString& ServiceName ) override;
+        virtual cpo::uno::Sequence< OUString > getSupportedServiceNames(  ) override;
         // XInitialization
-        virtual void SAL_CALL initialize( const cpo::uno::Sequence< cpo::uno::Any >& aArguments ) override;
+        virtual void initialize( const cpo::uno::Sequence< cpo::uno::Any >& aArguments ) override;
 
         // XStringSubstitution
-        virtual OUString SAL_CALL substituteVariables( const OUString& aText, bool bSubstRequired ) override;
-        virtual OUString SAL_CALL reSubstituteVariables( const OUString& aText ) override;
-        virtual OUString SAL_CALL getSubstituteVariableValue( const OUString& variable ) override;
+        virtual OUString substituteVariables( const OUString& aText, bool bSubstRequired ) override;
+        virtual OUString reSubstituteVariables( const OUString& aText ) override;
+        virtual OUString getSubstituteVariableValue( const OUString& variable ) override;
     };
 
 } // connectivity

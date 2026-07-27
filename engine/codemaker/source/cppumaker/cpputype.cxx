@@ -126,15 +126,15 @@ bool isBootstrapType(OUString const & name)
         "com.sun.star.registry.XSimpleRegistry",
         "com.sun.star.uno.DeploymentException",
         "com.sun.star.uno.RuntimeException",
-        "com.sun.star.uno.TypeClass",
+        "cpo.uno.TypeClass",
         "com.sun.star.uno.Uik",
-        "com.sun.star.uno.XAdapter",
+        "cpo.uno.XAdapter",
         "com.sun.star.uno.XAggregation",
         "com.sun.star.uno.XComponentContext",
         "com.sun.star.uno.XCurrentContext",
         "com.sun.star.uno.XInterface",
         "com.sun.star.uno.XReference",
-        "com.sun.star.uno.XUnloadingPreference",
+        "cpo.uno.XUnloadingPreference",
         "com.sun.star.uno.XWeak",
         "com.sun.star.util.XMacroExpander" };
         // cf. cppuhelper/unotypes/Makefile UNOTYPES (plus missing dependencies)
@@ -617,85 +617,85 @@ OUString CppuType::getTypeClass(OUString const & name, bool cStyle)
     case codemaker::UnoType::Sort::Void:
         return cStyle
                ? u"typelib_TypeClass_VOID"_ustr
-               : u"::css::uno::TypeClass_VOID"_ustr;
+               : u"::cpo::uno::TypeClass_VOID"_ustr;
     case codemaker::UnoType::Sort::Boolean:
         return cStyle
                ? u"typelib_TypeClass_BOOLEAN"_ustr
-               : u"::css::uno::TypeClass_BOOLEAN"_ustr;
+               : u"::cpo::uno::TypeClass_BOOLEAN"_ustr;
     case codemaker::UnoType::Sort::Byte:
         return cStyle
                ? u"typelib_TypeClass_BYTE"_ustr
-               : u"::css::uno::TypeClass_BYTE"_ustr;
+               : u"::cpo::uno::TypeClass_BYTE"_ustr;
     case codemaker::UnoType::Sort::Short:
         return cStyle
                ? u"typelib_TypeClass_SHORT"_ustr
-               : u"::css::uno::TypeClass_SHORT"_ustr;
+               : u"::cpo::uno::TypeClass_SHORT"_ustr;
     case codemaker::UnoType::Sort::UnsignedShort:
         return cStyle
                ? u"typelib_TypeClass_UNSIGNED_SHORT"_ustr
-               : u"::css::uno::TypeClass_UNSIGNED_SHORT"_ustr;
+               : u"::cpo::uno::TypeClass_UNSIGNED_SHORT"_ustr;
     case codemaker::UnoType::Sort::Long:
         return cStyle
                ? u"typelib_TypeClass_LONG"_ustr
-               : u"::css::uno::TypeClass_LONG"_ustr;
+               : u"::cpo::uno::TypeClass_LONG"_ustr;
     case codemaker::UnoType::Sort::UnsignedLong:
         return cStyle
                ? u"typelib_TypeClass_UNSIGNED_LONG"_ustr
-               : u"::css::uno::TypeClass_UNSIGNED_LONG"_ustr;
+               : u"::cpo::uno::TypeClass_UNSIGNED_LONG"_ustr;
     case codemaker::UnoType::Sort::Hyper:
         return cStyle
                ? u"typelib_TypeClass_HYPER"_ustr
-               : u"::css::uno::TypeClass_HYPER"_ustr;
+               : u"::cpo::uno::TypeClass_HYPER"_ustr;
     case codemaker::UnoType::Sort::UnsignedHyper:
         return cStyle
                ? u"typelib_TypeClass_UNSIGNED_HYPER"_ustr
-               : u"::css::uno::TypeClass_UNSIGNED_HYPER"_ustr;
+               : u"::cpo::uno::TypeClass_UNSIGNED_HYPER"_ustr;
     case codemaker::UnoType::Sort::Float:
         return cStyle
                ? u"typelib_TypeClass_FLOAT"_ustr
-               : u"::css::uno::TypeClass_FLOAT"_ustr;
+               : u"::cpo::uno::TypeClass_FLOAT"_ustr;
     case codemaker::UnoType::Sort::Double:
         return cStyle
                ? u"typelib_TypeClass_DOUBLE"_ustr
-               : u"::css::uno::TypeClass_DOUBLE"_ustr;
+               : u"::cpo::uno::TypeClass_DOUBLE"_ustr;
     case codemaker::UnoType::Sort::Char:
         return cStyle
                ? u"typelib_TypeClass_CHAR"_ustr
-               : u"::css::uno::TypeClass_CHAR"_ustr;
+               : u"::cpo::uno::TypeClass_CHAR"_ustr;
     case codemaker::UnoType::Sort::String:
         return cStyle
                ? u"typelib_TypeClass_STRING"_ustr
-               : u"::css::uno::TypeClass_STRING"_ustr;
+               : u"::cpo::uno::TypeClass_STRING"_ustr;
     case codemaker::UnoType::Sort::Type:
         return cStyle
                ? u"typelib_TypeClass_TYPE"_ustr
-               : u"::css::uno::TypeClass_TYPE"_ustr;
+               : u"::cpo::uno::TypeClass_TYPE"_ustr;
     case codemaker::UnoType::Sort::Any:
         return cStyle
                ? u"typelib_TypeClass_ANY"_ustr
-               : u"::css::uno::TypeClass_ANY"_ustr;
+               : u"::cpo::uno::TypeClass_ANY"_ustr;
     case codemaker::UnoType::Sort::Sequence:
         return cStyle
                ? u"typelib_TypeClass_SEQUENCE"_ustr
-               : u"::css::uno::TypeClass_SEQUENCE"_ustr;
+               : u"::cpo::uno::TypeClass_SEQUENCE"_ustr;
     case codemaker::UnoType::Sort::Enum:
         return cStyle
                ? u"typelib_TypeClass_ENUM"_ustr
-               : u"::css::uno::TypeClass_ENUM"_ustr;
+               : u"::cpo::uno::TypeClass_ENUM"_ustr;
     case codemaker::UnoType::Sort::PlainStruct:
     case codemaker::UnoType::Sort::PolymorphicStructTemplate:
     case codemaker::UnoType::Sort::InstantiatedPolymorphicStruct:
         return cStyle
                ? u"typelib_TypeClass_STRUCT"_ustr
-               : u"::css::uno::TypeClass_STRUCT"_ustr;
+               : u"::cpo::uno::TypeClass_STRUCT"_ustr;
     case codemaker::UnoType::Sort::Exception:
         return cStyle
                ? u"typelib_TypeClass_EXCEPTION"_ustr
-               : u"::css::uno::TypeClass_EXCEPTION"_ustr;
+               : u"::cpo::uno::TypeClass_EXCEPTION"_ustr;
     case codemaker::UnoType::Sort::Interface:
         return cStyle
                ? u"typelib_TypeClass_INTERFACE"_ustr
-               : u"::css::uno::TypeClass_INTERFACE"_ustr;
+               : u"::cpo::uno::TypeClass_INTERFACE"_ustr;
     case codemaker::UnoType::Sort::Typedef:
         return getTypeClass(dynamic_cast<unoidl::TypedefEntity&>(*ent).getType(), cStyle);
     default:
@@ -1126,8 +1126,7 @@ void InterfaceType::dumpDeclaration(FileStream & out)
     dumpAttributes(out);
     dumpMethods(out);
     out << "\n" << indent()
-        << ("static inline ::cpo::uno::Type const & SAL_CALL"
-            " static_type(void * = 0);\n\n");
+        << "static inline ::cpo::uno::Type const & static_type(void * = 0);\n\n";
     dec();
     out << "protected:\n";
     inc();
@@ -1177,12 +1176,12 @@ void InterfaceType::dumpAttributes(FileStream & out) const
         dumpDeprecation(out, depr);
         out << "virtual ";
         dumpType(out, attr.type);
-        out << " SAL_CALL get" << attr.name << "() = 0;\n";
+        out << " get" << attr.name << "() = 0;\n";
         if (!attr.readOnly) {
             bool byRef = passByReference(attr.type);
             out << indent();
             dumpDeprecation(out, depr);
-            out << "virtual void SAL_CALL set" << attr.name << "( ";
+            out << "virtual void set" << attr.name << "( ";
             dumpType(out, attr.type, byRef, byRef);
             out << " _" << attr.name.toAsciiLowerCase() << " ) = 0;\n";
         }
@@ -1199,7 +1198,7 @@ void InterfaceType::dumpMethods(FileStream & out) const
         dumpDeprecation(out, m_isDeprecated || isDeprecated(method.annotations));
         out << "virtual ";
         dumpType(out, method.returnType);
-        out << " SAL_CALL " << method.name << "(";
+        out << " " << method.name << "(";
         if (!method.parameters.empty()) {
             out << " ";
             for (std::vector< unoidl::InterfaceTypeEntity::Method::Parameter >::
@@ -1372,7 +1371,7 @@ void InterfaceType::dumpCppuAttributeRefs(FileStream & out, sal_uInt32 & index)
             << "],\n";
         inc(38);
         out << indent()
-            << "(typelib_TypeClass)::css::uno::TypeClass_INTERFACE_ATTRIBUTE,\n"
+            << "(typelib_TypeClass)::cpo::uno::TypeClass_INTERFACE_ATTRIBUTE,\n"
             << indent() << "sAttributeName" << n << ".pData );\n";
         dec(38);
         ++n;
@@ -1389,7 +1388,7 @@ void InterfaceType::dumpCppuMethodRefs(FileStream & out, sal_uInt32 & index)
             << "],\n";
         inc(38);
         out << indent()
-            << "(typelib_TypeClass)::css::uno::TypeClass_INTERFACE_METHOD,\n"
+            << "(typelib_TypeClass)::cpo::uno::TypeClass_INTERFACE_METHOD,\n"
             << indent() << "sMethodName" << n << ".pData );\n";
         dec(38);
         ++n;
@@ -3495,7 +3494,7 @@ void ServiceType::dumpHppFile(
           << " && (LO_URE_CURRENT_ENV) == (LO_URE_CTOR_ENV_"
           << name_.replaceAll(".", "_dot_") << ") && defined LO_URE_CTOR_FUN_"
           << name_.replaceAll(".", "_dot_")
-          << "\nextern \"C\" ::css::uno::XInterface * SAL_CALL LO_URE_CTOR_FUN_"
+          << "\nextern \"C\" ::css::uno::XInterface * LO_URE_CTOR_FUN_"
           << name_.replaceAll(".", "_dot_")
           << "(::css::uno::XComponentContext *, ::cpo::uno::Sequence< "
           "::cpo::uno::Any > const &);\n#endif\n";
@@ -3801,7 +3800,7 @@ void SingletonType::dumpHppFile(
       << " && (LO_URE_CURRENT_ENV) == (LO_URE_CTOR_ENV_"
       << name_.replaceAll(".", "_dot_") << ") && defined LO_URE_CTOR_FUN_"
       << name_.replaceAll(".", "_dot_")
-      << "\nextern \"C\" ::css::uno::XInterface * SAL_CALL LO_URE_CTOR_FUN_"
+      << "\nextern \"C\" ::css::uno::XInterface * LO_URE_CTOR_FUN_"
       << name_.replaceAll(".", "_dot_")
       << "(::css::uno::XComponentContext *, ::cpo::uno::Sequence< "
       "::cpo::uno::Any > const &);\n#endif\n";

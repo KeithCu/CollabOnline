@@ -20,7 +20,7 @@
 #pragma once
 
 #include <action.hxx>
-#include <cppcanvas/canvas.hxx>
+#include <canvas.hxx>
 
 
 namespace basegfx {
@@ -33,9 +33,9 @@ namespace com::sun::star::rendering
 }
 
 
-/* Definition of internal::PolyPolyActionFactory */
+/* Definition of PolyPolyActionFactory */
 
-namespace cppcanvas::internal
+namespace cppcanvas
     {
         struct OutDevState;
 

@@ -87,6 +87,23 @@ bool isValidImageSize(const std::string& size)
     }
 }
 
+bool isInsufficientQuotaError(const std::string& body)
+{
+    Poco::JSON::Object::Ptr root;
+    if (!JsonUtil::parseJSON(body, root) || !root)
+        return false;
+    const Poco::JSON::Object::Ptr err = root->getObject("error");
+    if (!err)
+        return false;
+    std::string code;
+    JsonUtil::findJSONValue(err, "code", code);
+    if (code == "insufficient_quota")
+        return true;
+    std::string type;
+    JsonUtil::findJSONValue(err, "type", type);
+    return type == "insufficient_quota";
+}
+
 const std::string AI_SYSTEM_PROMPT =
     "You are a helpful assistant for Collabora Online. "
     "Help users with their documents - answering questions, suggesting edits, "
@@ -183,9 +200,8 @@ std::string transformDescription(const std::string& docType)
 }
 
 /// Compose the extract_document_structure description for the open document
-/// type, advertising only the filters that work for it. filter="text" is only
-/// implemented for Writer and Calc, so it is omitted for Impress. Unknown type
-/// gets every fragment (previous all-types behaviour).
+/// type, advertising only the filters that work for it. Unknown type gets
+/// every fragment (previous all-types behaviour).
 std::string extractDescription(const std::string& docType)
 {
     std::string desc = DocumentToolDescriptions::EXTRACT_INTRO;
@@ -286,7 +302,7 @@ void AIChatSession::sendChatResult(bool success, const std::string& text,
 
 std::string AIChatSession::mapHttpStatusToError(
     int statusCode, const std::string& reasonPhrase,
-    const std::string& context)
+    const std::string& body, const std::string& context)
 {
     switch (statusCode)
     {
@@ -295,7 +311,10 @@ std::string AIChatSession::mapHttpStatusToError(
                                    : "Invalid " + context + " request";
         case 401 /* Unauthorized */:        return "Invalid API key";
         case 403 /* Forbidden */:           return "API key lacks permissions";
-        case 429 /* Too Many Requests */:   return "Rate limited - please wait a moment and retry";
+        case 429 /* Too Many Requests */:
+            return isInsufficientQuotaError(body)
+                       ? "API quota exceeded - check your plan and billing details"
+                       : "Rate limited - please wait a moment and retry";
         case 500 /* Internal Server Error */: return "API server error - try again later";
         case 503 /* Service Unavailable */:   return "Service temporarily unavailable";
         default:
@@ -333,7 +352,8 @@ Poco::JSON::Array::Ptr AIChatSession::buildToolDefinitions(const std::string& do
             { { "filter",
                 { "string", "Filter results to a specific structure type. "
                             "Use 'text' to read the document body as markdown (Writer: the "
-                            "full prose; Calc: the active sheet) for summarizing or answering "
+                            "full prose; Calc: the active sheet; Impress: the text of every "
+                            "slide) for summarizing or answering "
                             "questions about the content. "
                             "For Impress: 'slides'. For Writer: 'contentcontrol'. "
                             "Omit to get the full structure." } },
@@ -544,6 +564,9 @@ bool AIChatSession::handleAction(const std::string& firstLine)
             " or make text more concise, and they have provided selected text, reply"
             " with the rewritten text directly in your message. Do NOT call"
             " transform_document_structure for these requests."
+            " If they have not selected text, first read the slide text by calling"
+            " extract_document_structure with filter=\"text\", then reply with the"
+            " rewritten or summarized text directly in your message."
             " Only call transform_document_structure when the user explicitly asks to"
             " insert, add, create, replace, edit, modify, or delete slides or slide"
             " content. Never emit transform JSON, tool names, or .uno: commands in"
@@ -598,7 +621,8 @@ bool AIChatSession::handleAction(const std::string& firstLine)
                     " Use transform_document_structure to make changes."
                     " To summarize or answer questions about the document's content, call"
                     " extract_document_structure with filter=\"text\" to read the body text"
-                    " (Writer prose, or the active Calc sheet) as markdown."
+                    " (Writer prose, the active Calc sheet, or the text of every slide) as"
+                    " markdown."
                     " If a Writer whole-body read returns no text and instead carries"
                     " link_targets and an instruction, the document is too large to read"
                     " in full: show the headings and sections from link_targets to the"
@@ -681,6 +705,14 @@ bool AIChatSession::handleAction(const std::string& firstLine)
         sendChatResult(false, "AI features are disabled by the administrator", requestId);
         return true;
     }
+
+    // AI is refused for an anonymous user (for example a public share-link
+    // visitor), so a server-wide provider is not spent on them.
+    if (_session.isAnonymousUser())
+    {
+        sendChatResult(false, "AI is not available for guests", requestId);
+        return true;
+    }
 #endif
 
     if (_session.isDisableAISettings())
@@ -697,13 +729,10 @@ bool AIChatSession::handleAction(const std::string& firstLine)
         return true;
     }
 
-    if (!baseUrl.empty() && baseUrl.back() == '/')
-        baseUrl.pop_back();
-
     LOG_DBG("AIChatAction: request [" << requestId << "] with "
             << sanitizedMessages->size() << " messages, model: " << model);
 
-    std::string requestUrl = std::move(baseUrl);
+    std::string requestUrl = AIUtil::normalizeAIBaseUrl(baseUrl);
     requestUrl.append("/v1/chat/completions");
 
     // Initialize the tool loop state
@@ -778,8 +807,11 @@ void AIChatSession::callLLMAPI()
         return;
 
 #if !MOBILEAPP
+    // A built-in provider's host is a fixed public endpoint and is always
+    // allowed; only a custom host goes through the net.lok_allow allowlist.
     Poco::URI uri(_toolLoop->requestUrl);
-    if (HostUtil::isForbiddenKitHost(uri.getHost()))
+    if (!AIUtil::isPreCannedAIProviderHost(uri.getHost()) &&
+        HostUtil::isForbiddenKitHost(uri.getHost()))
     {
         LOG_WRN("Rejected AI chat request to host not in KIT allowlist ["
                 << Anonymizer::anonymizeUrl(_toolLoop->requestUrl) << ']');
@@ -853,7 +885,7 @@ void AIChatSession::callLLMAPI()
         {
             LOG_WRN("AIChat: provider returned HTTP " << statusCode
                     << " for request [" << requestId << "]; body: " << body);
-            self->sendChatResult(false, mapHttpStatusToError(statusCode, reason), requestId);
+            self->sendChatResult(false, mapHttpStatusToError(statusCode, reason, body), requestId);
             self->_toolLoop.reset();
             return;
         }
@@ -1857,14 +1889,14 @@ ImageGenRequest AIChatSession::createImageGenRequest(const std::string& prompt)
         return req;
     }
 
-    if (!baseUrl.empty() && baseUrl.back() == '/')
-        baseUrl.pop_back();
-
-    req.requestUrl = baseUrl + "/v1/images/generations";
+    req.requestUrl = AIUtil::normalizeAIBaseUrl(baseUrl) + "/v1/images/generations";
 
 #if !MOBILEAPP
+    // A built-in provider's host is a fixed public endpoint and is always
+    // allowed; only a custom host goes through the net.lok_allow allowlist.
     Poco::URI uri(req.requestUrl);
-    if (HostUtil::isForbiddenKitHost(uri.getHost()))
+    if (!AIUtil::isPreCannedAIProviderHost(uri.getHost()) &&
+        HostUtil::isForbiddenKitHost(uri.getHost()))
     {
         req.error = "Target host \"" + uri.getHost() +
                     "\" is not in the allowed host list, contact your administrator";

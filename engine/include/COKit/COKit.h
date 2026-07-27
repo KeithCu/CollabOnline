@@ -163,7 +163,7 @@ struct COKitClassStruct
     void (*executeScript) (
         char const * script, char ** result, char ** error,
         void (*proxyCallback) (void * data, char const * payload),
-        void * proxyCallbackData);
+        void * proxyCallbackData, bool * usedLegacyUnoApi);
 
     /// @see kit::Office::deliverProxyResult().
     void (*deliverProxyResult) (char const * callId, char const * jsonValue);
@@ -174,9 +174,24 @@ struct COKitClassStruct
     /// @see kit::Office::isExpectedReentry().
     int (*isExpectedReentry) (void);
 
+    /// @see kit::Office::takeLegacyUnoApiUseFlag().
+    bool (*takeLegacyUnoApiUseFlag) (void);
+
     /// @see kit::Office::registerRevealInFileManagerCallback()
     void (*registerRevealInFileManagerCallback)(COKit* pThis,
             COKitRevealInFileManagerCallback pCallback);
+
+    /** @see kit::Office::installClipboardProvider(). */
+    void (*installClipboardProvider) (COKit* pThis,
+                                      const COKitClipboardProvider* pProvider);
+
+    /** @see kit::Office::getGlobalClipboard(). */
+    int (*getGlobalClipboard) (COKit* pThis,
+                               const char **pMimeTypes,
+                               size_t      *pOutCount,
+                               char      ***pOutMimeTypes,
+                               size_t     **pOutSizes,
+                               char      ***pOutStreams);
 };
 
 struct COKitDocumentStruct
@@ -570,12 +585,11 @@ struct COKitDocumentClassStruct
     /// @see kit::Document::setAllowManageRedlines().
     void (*setAllowManageRedlines)(COKitDocument* pThis, int nId, bool allow);
 
-    /** @see kit::Document::installClipboardProvider(). */
-    void (*installClipboardProvider) (COKitDocument* pThis,
-                                      const COKitClipboardProvider* pProvider);
-
     /// @see kit::Document::transferClipboardFromView().
     void (*transferClipboardFromView)(COKitDocument* pThis, int nSourceViewId);
+
+    /// @see kit::Document::flushClipboard().
+    void (*flushClipboard)(COKitDocument* pThis);
 
 #endif // defined KIT_USE_UNSTABLE_API || defined LIBO_INTERNAL_ONLY
 };

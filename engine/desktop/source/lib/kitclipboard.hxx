@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <limits>
 #include <map>
 #include <optional>
 #include <vector>
@@ -53,6 +54,13 @@ public:
      */
     void setProvider(const COKitClipboardProvider* pProvider);
 
+    /**
+     * Render every advertised format now so a lazy transferable (Writer,
+     * Impress) builds its own clip document and stays readable after its source
+     * document is closed. A self-contained transferable (Calc) is unaffected.
+     */
+    void flushContents();
+
     /// get an XInterface easily.
     css::uno::Reference<css::uno::XInterface> getXI()
     {
@@ -60,27 +68,26 @@ public:
     }
 
     // XServiceInfo
-    OUString SAL_CALL getImplementationName() override;
-    bool SAL_CALL supportsService(const OUString& ServiceName) override;
-    cpo::uno::Sequence<OUString> SAL_CALL getSupportedServiceNames() override;
+    OUString getImplementationName() override;
+    bool supportsService(const OUString& ServiceName) override;
+    cpo::uno::Sequence<OUString> getSupportedServiceNames() override;
     static cpo::uno::Sequence<OUString> getSupportedServiceNames_static();
 
     // XClipboard
-    css::uno::Reference<css::datatransfer::XTransferable> SAL_CALL getContents() override;
-    void SAL_CALL setContents(
-        const css::uno::Reference<css::datatransfer::XTransferable>& xTransferable,
-        const css::uno::Reference<css::datatransfer::clipboard::XClipboardOwner>& xClipboardOwner)
-        override;
-    OUString SAL_CALL getName() override { return u"CLIPBOARD"_ustr; }
+    css::uno::Reference<css::datatransfer::XTransferable> getContents() override;
+    void setContents(const css::uno::Reference<css::datatransfer::XTransferable>& xTransferable,
+                     const css::uno::Reference<css::datatransfer::clipboard::XClipboardOwner>&
+                         xClipboardOwner) override;
+    OUString getName() override { return u"CLIPBOARD"_ustr; }
 
     // XClipboardEx
-    sal_Int8 SAL_CALL getRenderingCapabilities() override { return 0; }
+    sal_Int8 getRenderingCapabilities() override { return 0; }
 
     // XClipboardNotifier
-    void SAL_CALL addClipboardListener(
+    void addClipboardListener(
         const css::uno::Reference<css::datatransfer::clipboard::XClipboardListener>& listener)
         override;
-    void SAL_CALL removeClipboardListener(
+    void removeClipboardListener(
         const css::uno::Reference<css::datatransfer::clipboard::XClipboardListener>& listener)
         override;
 };
@@ -103,11 +110,11 @@ public:
                     const char** pInStreams);
     KitTransferable(const OUString& sMimeType, const cpo::uno::Sequence<sal_Int8>& aSequence);
 
-    cpo::uno::Any SAL_CALL getTransferData(const css::datatransfer::DataFlavor& rFlavor) override;
+    cpo::uno::Any getTransferData(const css::datatransfer::DataFlavor& rFlavor) override;
 
-    cpo::uno::Sequence<css::datatransfer::DataFlavor> SAL_CALL getTransferDataFlavors() override;
+    cpo::uno::Sequence<css::datatransfer::DataFlavor> getTransferDataFlavors() override;
 
-    bool SAL_CALL isDataFlavorSupported(const css::datatransfer::DataFlavor& rFlavor) override;
+    bool isDataFlavorSupported(const css::datatransfer::DataFlavor& rFlavor) override;
 };
 
 /**
@@ -126,9 +133,9 @@ class KitProviderTransferable : public cppu::WeakImplHelper<css::datatransfer::X
 public:
     explicit KitProviderTransferable(const COKitClipboardProvider& rProvider);
 
-    cpo::uno::Any SAL_CALL getTransferData(const css::datatransfer::DataFlavor& rFlavor) override;
-    cpo::uno::Sequence<css::datatransfer::DataFlavor> SAL_CALL getTransferDataFlavors() override;
-    bool SAL_CALL isDataFlavorSupported(const css::datatransfer::DataFlavor& rFlavor) override;
+    cpo::uno::Any getTransferData(const css::datatransfer::DataFlavor& rFlavor) override;
+    cpo::uno::Sequence<css::datatransfer::DataFlavor> getTransferDataFlavors() override;
+    bool isDataFlavorSupported(const css::datatransfer::DataFlavor& rFlavor) override;
 };
 
 /// Theoretically to hook into the (horrible) vcl dtranscomp.cxx code.
@@ -136,17 +143,27 @@ class KitClipboardFactory : public ::cppu::WeakComponentImplHelper<css::lang::XS
 {
     static osl::Mutex gMutex;
 
+    /// True while a process-global clipboard provider is installed, which the
+    /// in-process desktop apps do and the collaborative server does not. The kit
+    /// then serves one shared clipboard for all views and documents, instead of
+    /// one clipboard per view.
+    static bool gHasGlobalProvider;
+
+    /// Map key for the single shared clipboard; chosen so it never collides
+    /// with a real view id.
+    static constexpr int SHARED_VIEW_KEY = std::numeric_limits<int>::min();
+
 public:
     KitClipboardFactory()
         : cppu::WeakComponentImplHelper<css::lang::XSingleServiceFactory>(gMutex)
     {
     }
 
-    css::uno::Reference<css::uno::XInterface> SAL_CALL createInstance() override
+    css::uno::Reference<css::uno::XInterface> createInstance() override
     {
         return createInstanceWithArguments(cpo::uno::Sequence<cpo::uno::Any>());
     }
-    css::uno::Reference<css::uno::XInterface> SAL_CALL
+    css::uno::Reference<css::uno::XInterface>
     createInstanceWithArguments(const cpo::uno::Sequence<cpo::uno::Any>& /* rArgs */) override;
 
     /// Fetch clipboard from the global pool.
@@ -160,6 +177,15 @@ public:
     /// Release the clipboards of every view of one document as it is destroyed.
     /// Other documents open in the same engine keep their clipboards.
     static void releaseClipboardsForDocument(int nDocId);
+
+    /// Install a process-global clipboard provider and switch to one shared
+    /// clipboard for all views. Pass nullptr to remove it and return to
+    /// per-view clipboards.
+    static void installGlobalProvider(const COKitClipboardProvider* pProvider);
+
+    /// Render the shared clipboard's formats now, so its contents survive the
+    /// close of the document that produced them (see KitClipboard::flushContents).
+    static void flushSharedClipboard();
 };
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

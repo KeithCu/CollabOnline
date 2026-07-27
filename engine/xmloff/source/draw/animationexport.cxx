@@ -52,6 +52,8 @@
 #include <com/sun/star/presentation/TextAnimationType.hpp>
 #include <com/sun/star/presentation/ShapeAnimationSubType.hpp>
 #include <com/sun/star/presentation/EffectCommands.hpp>
+#include <com/sun/star/presentation/XSoundReference.hpp>
+#include <xmloff/SoundReference.hxx>
 #include <o3tl/any.hxx>
 #include <sax/tools/converter.hxx>
 #include <sal/log.hxx>
@@ -555,7 +557,9 @@ void AnimationsExporterImpl::exportTransitionNode()
 
     Any aSound( mxPageProps->getPropertyValue(u"Sound"_ustr) );
     OUString sSoundURL;
-    aSound >>= sSoundURL;
+    uno::Reference<XSoundReference> xSound;
+    if( (aSound >>= xSound) && xSound.is() )
+        sSoundURL = xSound->getURL();
     bool bStopSound = false;
     if( !(aSound >>= bStopSound) )
         bStopSound = false;
@@ -648,7 +652,9 @@ void AnimationsExporterImpl::prepareTransitionNode()
         if( nTransition == 0 )
         {
             Any aSound( mxPageProps->getPropertyValue(u"Sound"_ustr) );
-            aSound >>= sSoundURL;
+            uno::Reference<XSoundReference> xSound;
+            if( (aSound >>= xSound) && xSound.is() )
+                sSoundURL = xSound->getURL();
 
             if( !(aSound >>= bStopSound) )
                 bStopSound = false;
@@ -1370,8 +1376,7 @@ void AnimationsExporterImpl::exportAudio( const Reference< XAudio >& xAudio )
 
     try
     {
-        OUString aSourceURL;
-        xAudio->getSource() >>= aSourceURL;
+        OUString aSourceURL = xmloff::getSoundURL( xAudio->getSource() );
         if( !aSourceURL.isEmpty() )
             mxExport->AddAttribute( XML_NAMESPACE_XLINK, XML_HREF, mxExport->GetRelativeReference( aSourceURL ) );
 
@@ -1667,7 +1672,7 @@ void AnimationsExporterImpl::prepareValue( const Any& rValue )
         for( nElement = 0; nElement < nLength; nElement++, pAny++ )
             prepareValue( *pAny );
     }
-    else if( rValue.getValueTypeClass() == css::uno::TypeClass_INTERFACE )
+    else if( rValue.getValueTypeClass() == cpo::uno::TypeClass_INTERFACE )
     {
         Reference< XInterface> xRef( rValue, UNO_QUERY );
         if( xRef.is() )

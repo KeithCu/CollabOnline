@@ -443,19 +443,6 @@ public:
     }
 
     /**
-     * Register a clipboard backend for this document that does the raw platform
-     * clipboard input and output. With a provider installed the engine drives
-     * the format decision: it advertises its own formats on copy and, on an
-     * external paste, pulls only the single format it chose from the platform.
-     * Pass nullptr to remove the provider and fall back to the plain
-     * getClipboard()/setClipboard() handling.
-     */
-    void installClipboardProvider(const COKitClipboardProvider* pProvider)
-    {
-        mpDoc->pClass->installClipboardProvider(mpDoc, pProvider);
-    }
-
-    /**
      * Shares another view's live clipboard transferable into the current view's
      * clipboard by reference, without serializing (same-process only). The caller
      * must have made the destination the current view first.
@@ -465,6 +452,18 @@ public:
     void transferClipboardFromView(int nSourceViewId)
     {
         mpDoc->pClass->transferClipboardFromView(mpDoc, nSourceViewId);
+    }
+
+    /**
+     * Renders every advertised clipboard format now, so the clipboard's
+     * contents stay readable after this document is closed. Call it while the
+     * document is still alive, when it produced the current clipboard content
+     * and other documents remain open. A lazy transferable (Writer, Impress)
+     * builds its own clip document; a self-contained one (Calc) is unaffected.
+     */
+    void flushClipboard()
+    {
+        mpDoc->pClass->flushClipboard(mpDoc);
     }
 
     /**
@@ -1275,12 +1274,15 @@ public:
      * @param error out-param for the error message.
      * @param proxyCallback hook for proxy listener fires; may be null.
      * @param proxyCallbackData opaque pointer passed to @c proxyCallback on each call.
+     * @param usedLegacyUnoApi must be non-null; set to true if the script touched the legacy
+     *        com.sun.star UNO API, not modified otherwise.
      */
     void executeScript(char const * script, char ** result, char ** error,
                        void (*proxyCallback) (void * data, char const * payload) = nullptr,
-                       void * proxyCallbackData = nullptr)
+                       void * proxyCallbackData = nullptr, bool * usedLegacyUnoApi = nullptr)
     {
-        mpThis->pClass->executeScript(script, result, error, proxyCallback, proxyCallbackData);
+        mpThis->pClass->executeScript(
+            script, result, error, proxyCallback, proxyCallbackData, usedLegacyUnoApi);
     }
 
     /**
@@ -1324,6 +1326,18 @@ public:
     bool isExpectedReentry()
     {
         return mpThis->pClass->isExpectedReentry();
+    }
+
+    /**
+     * Returns and clears the process-wide "legacy UNO API use" flag set by the engine's UNO bridges
+     * (Basic, Python, ...) when at runtime a script resolves an identifer in the legacy UNO API.
+     *
+     * @return true if at least one legacy identifier was resolved since the last call; false
+     *         otherwise.
+     */
+    bool takeLegacyUnoApiUseFlag()
+    {
+        return mpThis->pClass->takeLegacyUnoApiUseFlag();
     }
 
     /**
@@ -1416,6 +1430,34 @@ public:
     void registerRevealInFileManagerCallback(COKitRevealInFileManagerCallback pCallback)
     {
         return mpThis->pClass->registerRevealInFileManagerCallback(mpThis, pCallback);
+    }
+
+    /**
+     * Installs a process-global clipboard provider and switches the kit to a
+     * single shared clipboard for every view and document. Use this in the
+     * in-process desktop app, where there is one local user and one platform
+     * clipboard, so the clipboard survives closing an individual document. Pass
+     * nullptr to remove the provider and return to the default per-view
+     * clipboards (as used by the collaborative server).
+     */
+    void installClipboardProvider(const COKitClipboardProvider* pProvider)
+    {
+        mpThis->pClass->installClipboardProvider(mpThis, pProvider);
+    }
+
+    /**
+     * Read the desktop app's single process-wide clipboard. See
+     * Document::getClipboard() for the parameters; this needs no document
+     * because the shared clipboard is process-global. The distinct name marks
+     * that it reads one global clipboard, not a per-view one.
+     */
+    bool getGlobalClipboard(const char **pMimeTypes,
+                            size_t      *pOutCount,
+                            char      ***pOutMimeTypes,
+                            size_t     **pOutSizes,
+                            char      ***pOutStreams)
+    {
+        return mpThis->pClass->getGlobalClipboard(mpThis, pMimeTypes, pOutCount, pOutMimeTypes, pOutSizes, pOutStreams);
     }
 
     /**

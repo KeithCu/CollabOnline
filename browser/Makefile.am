@@ -343,6 +343,7 @@ COOL_JS_LST =\
 	src/app/TableStylesService.ts \
 	src/core/geometry.ts \
 	src/core/TimerRegistry.ts \
+	src/core/DPIChangeListener.ts \
 	src/app/GraphicSelectionMiddleware.ts \
 	src/app/TextSelectionMiddleware.ts \
 	src/app/CellSelectionMarkerMiddleware.ts \
@@ -714,6 +715,7 @@ COOL_JS_LST =\
 	src/slideshow/LayerDrawing.ts \
 	src/slideshow/LayersCompositor.ts \
 	src/slideshow/RenderContext.ts \
+	src/slideshow/VectorCompositor.ts \
 	src/slideshow/VideoRenderer.ts \
 	src/slideshow/SlideRenderer.ts \
 	src/slideshow/SlideshowMiddleware.ts \
@@ -1049,7 +1051,7 @@ if APP_HAS_BRANDING
 	@if test -d "$(APP_BRANDING_DIR)" ; then cp -a "$(APP_BRANDING_DIR)"/images/*.svg $(DIST_FOLDER)/images/ ; fi
 	@if test -d "$(APP_BRANDING_DIR)" ; then cp -a "$(APP_BRANDING_DIR)/images/toolbar-bg-logo.svg" $(DIST_FOLDER)/images/toolbar-bg.svg ; fi
 if ENABLE_MACOS
-	@if test -d "$(APP_BRANDING_DIR)" ; then cp -a "$(APP_BRANDING_DIR)/welcome" "$(DIST_FOLDER)/" ; fi
+	@if test -d "$(APP_BRANDING_DIR)/welcome" ; then cp -a "$(APP_BRANDING_DIR)/welcome" "$(DIST_FOLDER)/" ; fi
 endif
 	@echo
 	@echo "JS, HTML and CSS has been updated ($(DIST_FOLDER))."
@@ -1168,7 +1170,7 @@ $(DIST_FOLDER)/bundle.css: $(call prereq_css)
 	$(QUIET_STYLELINT) $(NODE) node_modules/stylelint/bin/stylelint.js --config $(srcdir)/.stylelintrc.json $(srcdir)/css/*.css --fix
 	$(call bundle_css)
 
-$(DIST_FOLDER)/bundle.js: $(INTERMEDIATE_DIR)/cool-src.js $(call prereq_all)
+$(DIST_FOLDER)/bundle.js: $(INTERMEDIATE_DIR)/cool-src.js $(L10N_ALL_JS) $(call prereq_all)
 	@mkdir -p $(dir $@)
 	$(call bundle_all)
 
@@ -1227,8 +1229,21 @@ adminIntegratorSettings:
 		$(srcdir)/admin/adminIntegratorSettings.html.m4 \
 		> $(DIST_FOLDER)/adminIntegratorSettings.html
 
+# When NODE_MODULES_DIR is set, build node_modules under it and symlink it
+# into the build directory. The tree is removed and reinstalled every build,
+# as above.
 node_modules: package.json npm-shrinkwrap.json node_shrinkpack
-	@UV_USE_IO_URING=0 $(NPM) ci --offline
+	@if test -z "$(NODE_MODULES_DIR)"; then \
+		cp npm-shrinkwrap.json package-lock.json && \
+		UV_USE_IO_URING=0 $(NPM) ci --offline; \
+	else \
+		rm -rf "$(NODE_MODULES_DIR)/node_modules" && \
+		mkdir -p "$(NODE_MODULES_DIR)" && \
+		cp package.json npm-shrinkwrap.json "$(NODE_MODULES_DIR)"/ && \
+		ln -sfn "$(abs_builddir)/node_shrinkpack" "$(NODE_MODULES_DIR)"/node_shrinkpack && \
+		(cd "$(NODE_MODULES_DIR)" && cp npm-shrinkwrap.json package-lock.json && UV_USE_IO_URING=0 $(NPM) ci --offline) && \
+		ln -sfn "$(NODE_MODULES_DIR)/node_modules" node_modules; \
+	fi
 	@touch node_modules
 
 update-shrinkpack:
@@ -1577,6 +1592,7 @@ clean-local:
 	@rm -rf $(INTERMEDIATE_DIR)
 	@rm -rf $(TYPESCRIPT_JS_DIR)
 	@rm -rf node_modules
+	@rm -f package-lock.json
 	@rm -f $(abs_srcdir)/jsconfig.json
 	@rm -f $(abs_srcdir)/admin/jsconfig.json
 	@rm -f mocha.log duplication.log

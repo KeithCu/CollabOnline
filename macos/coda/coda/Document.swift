@@ -26,6 +26,14 @@ class Document: NSDocument {
     @objc
     var fakeClientFd: Int32 = -1
 
+    /// A connected fake-socket pair belonging to this document: closing the signal
+    /// end makes the watched end readable, which marks the end of this document's
+    /// engine connection. Both stay -1 until the connection is established.
+    @objc
+    var closeNotificationSignalFd: Int32 = -1
+    @objc
+    var closeNotificationWatchedFd: Int32 = -1
+
     /// ID to identify the document to be able to get access to lok::Document (eg. for printing)
     @objc
     var appDocId: Int32 = -1
@@ -126,9 +134,17 @@ class Document: NSDocument {
     }
 
     /**
-     * Called by the COOL once it flushed edits to `tempFileURL` (based on .uno:Save command result); completes any pending Save / Save As…
+     * Called with the result of a .uno:Save command from the engine; completes any pending
+     * Save / Save As…
+     *
+     * Every result completes a pending request, including "nothing to save" results
+     * (success without wasModified): the engine reports those when it had no edits to
+     * flush, and tempFileURL is current in that case, so the pending request can be
+     * finished by writing it out. A failed save fails the request instead, so the
+     * caller (and with it, for example, a quit waiting on the save) gets an answer
+     * rather than waiting forever.
      */
-    func triggerSave() {
+    func triggerSave(success: Bool, wasModified: Bool) {
         // Grab and clear the pending request atomically.
         var ps: PendingSave?
 
@@ -138,12 +154,21 @@ class Document: NSDocument {
         modifiedLock.unlock()
 
         if let ps {
-            // Finish the original AppKit request: write the bytes and call its original completion
-            DispatchQueue.main.async {
-                self.performPendingSave(ps)
+            if success {
+                // Finish the original AppKit request: write the bytes and call its original completion
+                DispatchQueue.main.async {
+                    self.performPendingSave(ps)
+                }
+            }
+            else {
+                // The engine could not flush the edits, so there are no current bytes
+                // to write; fail the original AppKit request.
+                DispatchQueue.main.async {
+                    ps.completion(CocoaError(.fileWriteUnknown))
+                }
             }
         }
-        else {
+        else if success && wasModified {
             // No pending AppKit request → internal/webview save: ask AppKit to Save (or show Save As… if untitled)
             DispatchQueue.main.async {
                 self.performImplicitSave()
@@ -332,6 +357,18 @@ class Document: NSDocument {
             if ps.operation == .saveAsOperation || (ps.operation == .saveOperation && self.fileURL == nil) {
                 self.fileURL = ps.url
                 self.fileType = ps.typeName
+            }
+
+            // fileModificationDate is NSDocument's record of the file's date on disk; a save
+            // that leaves it older than the file makes the next save report the file as
+            // changed by another application. The low-level write above does not maintain it
+            // (the higher-level NSDocument saving pipeline normally does), so refresh it here.
+            // Save To and autosave-elsewhere write somewhere other than the document's file
+            // and keep the record unchanged, hence the URL comparison.
+            if self.fileURL == ps.url,
+               let attributes = try? FileManager.default.attributesOfItem(atPath: ps.url.path),
+               let modificationDate = attributes[.modificationDate] as? Date {
+                self.fileModificationDate = modificationDate
             }
 
             // Clear edited state only if nothing new happened since this save began.
@@ -542,12 +579,48 @@ class Document: NSDocument {
         return msgStr.prefix(100) + (msgStr.count > 100 ? "..." : "")
     }
 
+    /// Whether the message in the buffer starts with the given prefix.
+    private func message(_ buffer: UnsafePointer<CChar>, length: Int,
+                         hasPrefix prefix: String) -> Bool {
+        let prefixLength = prefix.utf8.count
+        return length > prefixLength && strncmp(buffer, prefix, prefixLength) == 0
+    }
+
+    /**
+     * Handles a unocommandresult message from the engine. The page receives the
+     * message too, but its processing runs on the page's timers and animation
+     * frames, which an occluded window's page may not run at all; a command result
+     * that something waits on - like a save during quitting - completes here even
+     * then. Only the .uno:Save result is handled so far.
+     */
+    private func handleUnoCommandResult(buffer: UnsafePointer<CChar>, length: Int) {
+        let message = String(
+            decoding: UnsafeRawBufferPointer(start: UnsafeRawPointer(buffer), count: length),
+            as: UTF8.self)
+        guard let brace = message.firstIndex(of: "{"),
+              let result = try? JSONDecoder().decode(
+                  CommandResult.self, from: Data(message[brace...].utf8)) else {
+            return
+        }
+
+        if result.commandName == ".uno:Save" {
+            triggerSave(success: result.success == true,
+                        wasModified: result.wasModified == true)
+        }
+    }
+
     @objc
     func send2JS(_ buffer: UnsafePointer<CChar>, length: Int) {
         let abbrMsg = abbreviatedMessage(buffer: buffer, length: length)
         COWrapper.LOG_TRC("To JS: \(abbrMsg)")
 
         let binaryMessage = COWrapper.isBinaryMessage(buffer, length: length)
+
+        // Handle command results straight from the engine's message stream, ahead
+        // of the page hand-off below.
+        if !binaryMessage && message(buffer, length: length, hasPrefix: "unocommandresult:") {
+            handleUnoCommandResult(buffer: buffer, length: length)
+        }
 
         let pretext = binaryMessage
             ? "window.TheFakeWebSocket.onmessage({'data': window.atob('"

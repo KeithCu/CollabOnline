@@ -94,6 +94,9 @@ class SAL_WARN_UNUSED SVL_DLLPUBLIC SfxItemSet
 #ifdef DBG_UTIL
     sal_uInt16          m_nRegisteredSfxItemIter;
 #endif
+#ifndef NDEBUG
+    bool                m_bDeleted;
+#endif
 
     WhichRangesContainer m_aWhichRanges;  ///< array of Which Ranges
 
@@ -122,6 +125,10 @@ public:
     SfxItemSet( SfxItemPool&, WhichRangesContainer ranges );
     SfxItemSet( SfxItemPool& rPool, sal_uInt16 nWhichStart, sal_uInt16 nWhichEnd )
         : SfxItemSet(rPool, WhichRangesContainer(nWhichStart, nWhichEnd)) {}
+
+#ifndef NDEBUG
+    bool isDeleted() const { return m_bDeleted; }
+#endif
 
     template<sal_uInt16... WIDs>
     static SfxItemSet makeFixedSfxItemSet(SfxItemPool& pool)
@@ -239,6 +246,7 @@ public:
     void                        MergeValue( const SfxPoolItem& rItem);
 
     SfxItemPool*                GetPool() const { return m_pPool; }
+    SfxItemPool& getPool() const { assert(!isDeleted() && "Destructed instance used (!)"); return *m_pPool; }
     const WhichRangesContainer & GetRanges() const { return m_aWhichRanges; }
     void                        SetRanges( const WhichRangesContainer& );
     void                        SetRanges( WhichRangesContainer&& );

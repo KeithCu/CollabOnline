@@ -13,7 +13,7 @@
 #include <com/sun/star/uno/Reference.hxx>
 #include <com/sun/star/rendering/RenderState.hpp>
 #include <basegfx/vector/b2dsize.hxx>
-#include <cppcanvas/canvas.hxx>
+#include <canvas.hxx>
 
 namespace com::sun::star::rendering
 {
@@ -26,8 +26,6 @@ struct TextLineInfo;
 }
 
 namespace cppcanvas
-{
-namespace internal
 {
 struct OutDevState;
 
@@ -69,7 +67,6 @@ public:
      */
     void render(const css::rendering::RenderState& rRenderState, bool bNormalText) const;
 };
-}
 }
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab cinoptions=b1,g0,N-s cinkeys+=0=break: */

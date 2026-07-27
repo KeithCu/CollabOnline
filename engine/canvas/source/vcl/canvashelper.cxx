@@ -49,8 +49,8 @@
 
 #include "canvasbitmap.hxx"
 #include "canvasfont.hxx"
-#include "canvashelper.hxx"
-#include "impltools.hxx"
+#include <canvashelper.hxx>
+#include <impltools.hxx>
 #include "textlayout.hxx"
 
 
@@ -143,13 +143,6 @@ namespace vclcanvas
         mpOutDevProvider = rOutDev;
     }
 
-    void CanvasHelper::setBackgroundOutDev( const OutDevProviderSharedPtr& rOutDev )
-    {
-        mp2ndOutDevProvider = rOutDev;
-        mp2ndOutDevProvider->getOutDev().EnableMapMode( false );
-        mp2ndOutDevProvider->getOutDev().SetAntialiasing( AntialiasingFlags::Enable );
-    }
-
     void CanvasHelper::clear()
     {
         // are we disposed?
@@ -209,50 +202,10 @@ namespace vclcanvas
             mp2ndOutDevProvider->getOutDev().DrawLine( aStartPoint, aEndPoint );
     }
 
-    void CanvasHelper::drawBezier( const rendering::XCanvas*            ,
-                                   const geometry::RealBezierSegment2D& aBezierSegment,
-                                   const geometry::RealPoint2D&         _aEndPoint,
-                                   const rendering::ViewState&          viewState,
-                                   const rendering::RenderState&        renderState )
-    {
-        if( !mpOutDevProvider )
-            return;
-
-        vclcanvastools::OutDevStateKeeper aStateKeeper( mpProtectedOutDevProvider );
-        setupOutDevState( viewState, renderState, LINE_COLOR );
-
-        const Point aStartPoint( vclcanvastools::mapRealPoint2D( geometry::RealPoint2D(aBezierSegment.Px,
-                                                                               aBezierSegment.Py),
-                                                        viewState, renderState ) );
-        const Point aCtrlPoint1( vclcanvastools::mapRealPoint2D( geometry::RealPoint2D(aBezierSegment.C1x,
-                                                                               aBezierSegment.C1y),
-                                                        viewState, renderState ) );
-        const Point aCtrlPoint2( vclcanvastools::mapRealPoint2D( geometry::RealPoint2D(aBezierSegment.C2x,
-                                                                               aBezierSegment.C2y),
-                                                         viewState, renderState ) );
-        const Point aEndPoint( vclcanvastools::mapRealPoint2D( _aEndPoint,
-                                                       viewState, renderState ) );
-
-        ::tools::Polygon aPoly(4);
-        aPoly.SetPoint( aStartPoint, 0 );
-        aPoly.SetFlags( 0, PolyFlags::Normal );
-        aPoly.SetPoint( aCtrlPoint1, 1 );
-        aPoly.SetFlags( 1, PolyFlags::Control );
-        aPoly.SetPoint( aCtrlPoint2, 2 );
-        aPoly.SetFlags( 2, PolyFlags::Control );
-        aPoly.SetPoint( aEndPoint, 3 );
-        aPoly.SetFlags( 3, PolyFlags::Normal );
-
-        // TODO(F2): alpha
-        mpOutDevProvider->getOutDev().DrawPolygon( aPoly );
-        if( mp2ndOutDevProvider )
-            mp2ndOutDevProvider->getOutDev().DrawPolygon( aPoly );
-    }
-
-    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawPolyPolygon( const rendering::XCanvas*                          ,
-                                                                                 const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon,
-                                                                                 const rendering::ViewState&                        viewState,
-                                                                                 const rendering::RenderState&                      renderState )
+    void CanvasHelper::drawPolyPolygon( const rendering::XCanvas*                          ,
+                                         const uno::Reference< rendering::XPolyPolygon2D >& xPolyPolygon,
+                                         const rendering::ViewState&                        viewState,
+                                         const rendering::RenderState&                      renderState )
     {
         ENSURE_ARG_OR_THROW( xPolyPolygon.is(),
                          "polygon is NULL");
@@ -263,7 +216,7 @@ namespace vclcanvas
             setupOutDevState( viewState, renderState, LINE_COLOR );
 
             const ::basegfx::B2DPolyPolygon aBasegfxPolyPoly(
-                ::basegfx::unotools::b2DPolyPolygonFromXPolyPolygon2D(xPolyPolygon) );
+                ::canvastools::b2DPolyPolygonFromXPolyPolygon2D(xPolyPolygon) );
             const ::tools::PolyPolygon aPolyPoly( vclcanvastools::mapPolyPolygon( aBasegfxPolyPoly, viewState, renderState ) );
 
             if( aBasegfxPolyPoly.isClosed() )
@@ -293,16 +246,13 @@ namespace vclcanvas
                 }
             }
         }
-
-        // TODO(P1): Provide caching here.
-        return uno::Reference< rendering::XCachedPrimitive >(nullptr);
     }
 
-    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::strokePolyPolygon( const rendering::XCanvas*                            ,
-                                                                                   const uno::Reference< rendering::XPolyPolygon2D >&   xPolyPolygon,
-                                                                                   const rendering::ViewState&                          viewState,
-                                                                                   const rendering::RenderState&                        renderState,
-                                                                                   const rendering::StrokeAttributes&                   strokeAttributes )
+    void CanvasHelper::strokePolyPolygon( const rendering::XCanvas*                            ,
+                                           const uno::Reference< rendering::XPolyPolygon2D >&   xPolyPolygon,
+                                           const rendering::ViewState&                          viewState,
+                                           const rendering::RenderState&                        renderState,
+                                           const rendering::StrokeAttributes&                   strokeAttributes )
     {
         ENSURE_ARG_OR_THROW( xPolyPolygon.is(),
                          "polygon is NULL");
@@ -315,7 +265,7 @@ namespace vclcanvas
             ::canvastools::mergeViewAndRenderTransform(aMatrix, viewState, renderState);
 
             ::basegfx::B2DPolyPolygon aPolyPoly(
-                ::basegfx::unotools::b2DPolyPolygonFromXPolyPolygon2D(xPolyPolygon) );
+                ::canvastools::b2DPolyPolygonFromXPolyPolygon2D(xPolyPolygon) );
 
             // apply dashing, if any
             if( strokeAttributes.DashArray.hasElements() )
@@ -413,39 +363,6 @@ namespace vclcanvas
                 }
             }
         }
-
-        // TODO(P1): Provide caching here.
-        return uno::Reference< rendering::XCachedPrimitive >(nullptr);
-    }
-
-    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::strokeTexturedPolyPolygon( const rendering::XCanvas*                            ,
-                                                                                           const uno::Reference< rendering::XPolyPolygon2D >&   ,
-                                                                                           const rendering::ViewState&                          ,
-                                                                                           const rendering::RenderState&                        ,
-                                                                                           const cpo::uno::Sequence< rendering::Texture >&           ,
-                                                                                           const rendering::StrokeAttributes&                    )
-    {
-        return uno::Reference< rendering::XCachedPrimitive >(nullptr);
-    }
-
-    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::strokeTextureMappedPolyPolygon( const rendering::XCanvas*                           ,
-                                                                                                const uno::Reference< rendering::XPolyPolygon2D >&  ,
-                                                                                                const rendering::ViewState&                         ,
-                                                                                                const rendering::RenderState&                       ,
-                                                                                                const cpo::uno::Sequence< rendering::Texture >&          ,
-                                                                                                const uno::Reference< geometry::XMapping2D >&       ,
-                                                                                                const rendering::StrokeAttributes&                   )
-    {
-        return uno::Reference< rendering::XCachedPrimitive >(nullptr);
-    }
-
-    uno::Reference< rendering::XPolyPolygon2D >   CanvasHelper::queryStrokeShapes( const rendering::XCanvas*                            ,
-                                                                                   const uno::Reference< rendering::XPolyPolygon2D >&   ,
-                                                                                   const rendering::ViewState&                          ,
-                                                                                   const rendering::RenderState&                        ,
-                                                                                   const rendering::StrokeAttributes&                    )
-    {
-        return uno::Reference< rendering::XPolyPolygon2D >(nullptr);
     }
 
     uno::Reference< rendering::XCachedPrimitive > CanvasHelper::fillPolyPolygon( const rendering::XCanvas*                          ,
@@ -462,7 +379,7 @@ namespace vclcanvas
 
             const int nAlpha( setupOutDevState( viewState, renderState, FILL_COLOR ) );
             ::basegfx::B2DPolyPolygon aB2DPolyPoly(
-                ::basegfx::unotools::b2DPolyPolygonFromXPolyPolygon2D(xPolyPolygon));
+                ::canvastools::b2DPolyPolygonFromXPolyPolygon2D(xPolyPolygon));
             aB2DPolyPoly.setClosed(true); // ensure closed poly, otherwise VCL does not fill
             const ::tools::PolyPolygon aPolyPoly( vclcanvastools::mapPolyPolygon(
                                              aB2DPolyPoly,
@@ -496,16 +413,6 @@ namespace vclcanvas
         return uno::Reference< rendering::XCachedPrimitive >(nullptr);
     }
 
-    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::fillTextureMappedPolyPolygon( const rendering::XCanvas*                             ,
-                                                                                              const uno::Reference< rendering::XPolyPolygon2D >&    ,
-                                                                                              const rendering::ViewState&                           ,
-                                                                                              const rendering::RenderState&                         ,
-                                                                                              const cpo::uno::Sequence< rendering::Texture >&            ,
-                                                                                              const uno::Reference< geometry::XMapping2D >&              )
-    {
-        return uno::Reference< rendering::XCachedPrimitive >(nullptr);
-    }
-
     uno::Reference< rendering::XCanvasFont > CanvasHelper::createFont( const rendering::XCanvas*                        ,
                                                                        const rendering::FontRequest&                    fontRequest,
                                                                        const cpo::uno::Sequence< beans::PropertyValue >&     extraFontProperties,
@@ -522,20 +429,12 @@ namespace vclcanvas
         return uno::Reference< rendering::XCanvasFont >();
     }
 
-    cpo::uno::Sequence< rendering::FontInfo > CanvasHelper::queryAvailableFonts( const rendering::XCanvas*                       ,
-                                                                            const rendering::FontInfo&                      ,
-                                                                            const cpo::uno::Sequence< beans::PropertyValue >&     )
-    {
-        // TODO(F2)
-        return cpo::uno::Sequence< rendering::FontInfo >();
-    }
-
-    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawText( const rendering::XCanvas*                         ,
-                                                                          const rendering::StringContext&                   text,
-                                                                          const uno::Reference< rendering::XCanvasFont >&   xFont,
-                                                                          const rendering::ViewState&                       viewState,
-                                                                          const rendering::RenderState&                     renderState,
-                                                                          sal_Int8                                          textDirection )
+    void CanvasHelper::drawText( const rendering::XCanvas*                         ,
+                                  const rendering::StringContext&                   text,
+                                  const uno::Reference< rendering::XCanvasFont >&   xFont,
+                                  const rendering::ViewState&                       viewState,
+                                  const rendering::RenderState&                     renderState,
+                                  sal_Int8                                          textDirection )
     {
         ENSURE_ARG_OR_THROW( xFont.is(),
                          "font is NULL");
@@ -546,7 +445,7 @@ namespace vclcanvas
 
             ::Point aOutpos;
             if( !setupTextOutput( aOutpos, viewState, renderState, xFont ) )
-                return uno::Reference< rendering::XCachedPrimitive >(nullptr); // no output necessary
+                return; // no output necessary
 
             // change text direction and layout mode
             vcl::text::ComplexTextLayoutFlags nLayoutMode(vcl::text::ComplexTextLayoutFlags::Default);
@@ -583,14 +482,12 @@ namespace vclcanvas
                                                    ::canvastools::numeric_cast<sal_uInt16>(text.Length) );
             }
         }
-
-        return uno::Reference< rendering::XCachedPrimitive >(nullptr);
     }
 
-    uno::Reference< rendering::XCachedPrimitive > CanvasHelper::drawTextLayout( const rendering::XCanvas*                       ,
-                                                                                const uno::Reference< rendering::XTextLayout >& xLayoutedText,
-                                                                                const rendering::ViewState&                     viewState,
-                                                                                const rendering::RenderState&                   renderState )
+    void CanvasHelper::drawTextLayout( const rendering::XCanvas*                       ,
+                                        const uno::Reference< rendering::XTextLayout >& xLayoutedText,
+                                        const rendering::ViewState&                     viewState,
+                                        const rendering::RenderState&                   renderState )
     {
         ENSURE_ARG_OR_THROW( xLayoutedText.is(),
                          "layout is NULL");
@@ -610,7 +507,7 @@ namespace vclcanvas
 
                 ::Point aOutpos;
                 if( !setupTextOutput( aOutpos, viewState, renderState, xLayoutedText->getFont() ) )
-                    return uno::Reference< rendering::XCachedPrimitive >(nullptr); // no output necessary
+                    return; // no output necessary
 
                 // TODO(F2): What about the offset scalings?
                 // TODO(F2): alpha
@@ -625,8 +522,6 @@ namespace vclcanvas
             ENSURE_ARG_OR_THROW( false,
                                  "TextLayout not compatible with this canvas" );
         }
-
-        return uno::Reference< rendering::XCachedPrimitive >(nullptr);
     }
 
     uno::Reference< rendering::XCachedPrimitive > CanvasHelper::implDrawBitmap( const rendering::XCanvas*                   pCanvas,
@@ -907,123 +802,6 @@ namespace vclcanvas
         return vcl::unotools::integerSize2DFromSize( mpOutDevProvider->getOutDev().GetOutputSizePixel() );
     }
 
-    uno::Reference< rendering::XBitmap > CanvasHelper::getScaledBitmap( const geometry::RealSize2D& newSize,
-                                                                        bool                        beFast )
-    {
-        if( !mpOutDevProvider || !mpDevice )
-            return uno::Reference< rendering::XBitmap >(); // we're disposed
-
-        OutputDevice& rOutDev( mpOutDevProvider->getOutDev() );
-
-        vclcanvastools::OutDevStateKeeper aStateKeeper( mpProtectedOutDevProvider );
-        rOutDev.EnableMapMode( false );
-        rOutDev.SetAntialiasing( AntialiasingFlags::Enable );
-
-        // TODO(F2): Support alpha vdev canvas here
-        const Point aEmptyPoint(0,0);
-        const Size  aBmpSize( rOutDev.GetOutputSizePixel() );
-
-        ::Bitmap aBitmap( rOutDev.GetBitmap(aEmptyPoint, aBmpSize) );
-
-        aBitmap.Scale( vcl::unotools::sizeFromRealSize2D(newSize),
-                       beFast ? BmpScaleFlag::Default : BmpScaleFlag::BestQuality );
-
-        return uno::Reference< rendering::XBitmap >(
-            new CanvasBitmap( aBitmap, *mpDevice, mpOutDevProvider ) );
-    }
-
-    cpo::uno::Sequence< sal_Int8 > CanvasHelper::getData( rendering::IntegerBitmapLayout&     rLayout,
-                                                     const geometry::IntegerRectangle2D& rect )
-    {
-        if( !mpOutDevProvider )
-            return cpo::uno::Sequence< sal_Int8 >(); // we're disposed
-
-        rLayout = getMemoryLayout();
-
-        // TODO(F2): Support alpha canvas here
-        const ::tools::Rectangle aRect( vcl::unotools::rectangleFromIntegerRectangle2D(rect) );
-
-        OutputDevice& rOutDev( mpOutDevProvider->getOutDev() );
-
-        vclcanvastools::OutDevStateKeeper aStateKeeper( mpProtectedOutDevProvider );
-        rOutDev.EnableMapMode( false );
-        rOutDev.SetAntialiasing( AntialiasingFlags::Enable );
-
-        Bitmap aBitmap( rOutDev.GetBitmap(aRect.TopLeft(),
-                                          aRect.GetSize()).CreateColorBitmap() );
-
-        BitmapScopedReadAccess pReadAccess( aBitmap );
-
-        ENSURE_OR_THROW( pReadAccess.get() != nullptr,
-                         "Could not acquire read access to OutDev bitmap" );
-
-        const sal_Int32 nWidth( rect.X2 - rect.X1 );
-        const sal_Int32 nHeight( rect.Y2 - rect.Y1 );
-
-        rLayout.ScanLines = nHeight;
-        rLayout.ScanLineBytes = nWidth*4;
-        rLayout.ScanLineStride = rLayout.ScanLineBytes;
-
-        cpo::uno::Sequence< sal_Int8 > aRes( 4*nWidth*nHeight );
-        sal_Int8* pRes = aRes.getArray();
-
-        int nCurrPos(0);
-        for( int y=0; y<nHeight; ++y )
-        {
-            for( int x=0; x<nWidth; ++x )
-            {
-                pRes[ nCurrPos++ ] = pReadAccess->GetColor( y, x ).GetRed();
-                pRes[ nCurrPos++ ] = pReadAccess->GetColor( y, x ).GetGreen();
-                pRes[ nCurrPos++ ] = pReadAccess->GetColor( y, x ).GetBlue();
-                pRes[ nCurrPos++ ] = -1;
-            }
-        }
-
-        return aRes;
-    }
-
-    cpo::uno::Sequence< sal_Int8 > CanvasHelper::getPixel( rendering::IntegerBitmapLayout& rLayout,
-                                                      const geometry::IntegerPoint2D& pos )
-    {
-        if( !mpOutDevProvider )
-            return cpo::uno::Sequence< sal_Int8 >(); // we're disposed
-
-        rLayout = getMemoryLayout();
-        rLayout.ScanLines = 1;
-        rLayout.ScanLineBytes = 4;
-        rLayout.ScanLineStride = rLayout.ScanLineBytes;
-
-        OutputDevice& rOutDev( mpOutDevProvider->getOutDev() );
-
-        vclcanvastools::OutDevStateKeeper aStateKeeper( mpProtectedOutDevProvider );
-        rOutDev.EnableMapMode( false );
-        rOutDev.SetAntialiasing( AntialiasingFlags::Enable );
-
-        const Size aBmpSize( rOutDev.GetOutputSizePixel() );
-
-        ENSURE_ARG_OR_THROW( pos.X >= 0 && pos.X < aBmpSize.Width(),
-                             "X coordinate out of bounds" );
-        ENSURE_ARG_OR_THROW( pos.Y >= 0 && pos.Y < aBmpSize.Height(),
-                             "Y coordinate out of bounds" );
-
-        // TODO(F2): Support alpha canvas here
-        return ::canvastools::colorToStdIntSequence(
-            rOutDev.GetPixel(
-                vcl::unotools::pointFromIntegerPoint2D( pos )));
-    }
-
-    rendering::IntegerBitmapLayout CanvasHelper::getMemoryLayout()
-    {
-        if( !mpOutDevProvider )
-            return rendering::IntegerBitmapLayout(); // we're disposed
-
-        rendering::IntegerBitmapLayout aBitmapLayout( ::canvastools::getStdMemoryLayout(getSize()) );
-        if ( !mbHaveAlpha )
-            aBitmapLayout.ColorSpace = canvastools::getStdColorSpaceWithoutAlpha();
-
-        return aBitmapLayout;
-    }
-
     int CanvasHelper::setupOutDevState( const rendering::ViewState&     viewState,
                                         const rendering::RenderState&   renderState,
                                         ColorType                       eColorType ) const
@@ -1173,15 +951,6 @@ namespace vclcanvas
 
             return true;
         }
-    }
-
-    void CanvasHelper::flush() const
-    {
-        if (mpOutDevProvider)
-            mpOutDevProvider->getOutDev().Flush();
-
-        if  (mp2ndOutDevProvider)
-            mp2ndOutDevProvider->getOutDev().Flush();
     }
 
 }

@@ -31,6 +31,7 @@
 #include <cppuhelper/exc_hlp.hxx>
 #include <comphelper/interfacecontainer4.hxx>
 #include <comphelper/extract.hxx>
+#include <comphelper/legacyunoapinotice.hxx>
 #include <comphelper/processfactory.hxx>
 #include <cppuhelper/weakref.hxx>
 
@@ -2614,7 +2615,7 @@ SbxVariable* SbUnoObject::Find( const OUString& rName, SbxClassType t )
 
                 SbxDataType eRealSbxType = ( ( aProp.Attributes & PropertyAttribute::MAYBEVOID ) ? unoToSbxType( aProp.Type.getTypeClass() ) : eSbxType );
                 // create the property and superimpose it
-                auto pProp = tools::make_ref<SbUnoProperty>( aProp.Name, eSbxType, eRealSbxType, aProp, 0, false, ( aProp.Type.getTypeClass() ==  css::uno::TypeClass_STRUCT  ) );
+                auto pProp = tools::make_ref<SbUnoProperty>( aProp.Name, eSbxType, eRealSbxType, aProp, 0, false, ( aProp.Type.getTypeClass() ==  cpo::uno::TypeClass_STRUCT  ) );
                 QuickInsert( pProp.get() );
                 pRes = pProp.get();
             }
@@ -2792,7 +2793,7 @@ void SbUnoObject::implCreateAll()
 
         SbxDataType eRealSbxType = ( ( rProp.Attributes & PropertyAttribute::MAYBEVOID ) ? unoToSbxType( rProp.Type.getTypeClass() ) : eSbxType );
         // Create property and superimpose it
-        auto xVarRef = tools::make_ref<SbUnoProperty>( rProp.Name, eSbxType, eRealSbxType, rProp, i, false, ( rProp.Type.getTypeClass() == css::uno::TypeClass_STRUCT   ) );
+        auto xVarRef = tools::make_ref<SbUnoProperty>( rProp.Name, eSbxType, eRealSbxType, rProp, i, false, ( rProp.Type.getTypeClass() == cpo::uno::TypeClass_STRUCT   ) );
         QuickInsert( xVarRef.get() );
     }
 
@@ -2920,6 +2921,7 @@ void RTL_Impl_CreateUnoStruct( SbxArray& rPar )
 
     // get the name of the class of the struct
     OUString aClassName = rPar.Get(1)->GetOUString();
+    comphelper::notifyLegacyUnoApiUse(aClassName);
 
     // try to create Struct with the same name
     SbUnoObjectRef xUnoObj = Impl_CreateUnoStruct( aClassName );
@@ -2943,6 +2945,7 @@ void RTL_Impl_CreateUnoService( SbxArray& rPar )
 
     // get the name of the class of the struct
     OUString aServiceName = rPar.Get(1)->GetOUString();
+    comphelper::notifyLegacyUnoApiUse(aServiceName);
 
     // search for the service and instantiate it
     Reference< XMultiServiceFactory > xFactory( comphelper::getProcessServiceFactory() );
@@ -2988,6 +2991,7 @@ void RTL_Impl_CreateUnoServiceWithArguments( SbxArray& rPar )
 
     // get the name of the class of the struct
     OUString aServiceName = rPar.Get(1)->GetOUString();
+    comphelper::notifyLegacyUnoApiUse(aServiceName);
     Any aArgAsAny = sbxToUnoValue(rPar.Get(2),
                 cppu::UnoType<Sequence<Any>>::get() );
     Sequence< Any > aArgs;
@@ -3306,6 +3310,7 @@ SbUnoClass* findUnoClass( const OUString& rName )
     // #105550 Check if module exists
     SbUnoClass* pUnoClass = nullptr;
 
+    comphelper::notifyLegacyUnoApiUse(rName);
     const Reference< XHierarchicalNameAccess >& xTypeAccess = getTypeProvider_Impl();
     if( xTypeAccess->hasByHierarchicalName( rName ) )
     {
@@ -4656,7 +4661,7 @@ SbxVariable* SbUnoStructRefObject::Find( const OUString& rName, SbxClassType t )
             Property aProp;
             aProp.Name = rName;
             aProp.Type = cpo::uno::Type( it->second->getTypeClass(), it->second->getTypeName() );
-            const bool bIsStruct = aProp.Type.getTypeClass() == css::uno::TypeClass_STRUCT;
+            const bool bIsStruct = aProp.Type.getTypeClass() == cpo::uno::TypeClass_STRUCT;
             SbUnoProperty* pProp = new SbUnoProperty( rName, eSbxType, eRealSbxType, std::move(aProp), 0, false, bIsStruct );
             SbxVariableRef xVarRef = pProp;
             QuickInsert( xVarRef.get() );
@@ -4717,7 +4722,7 @@ void SbUnoStructRefObject::implCreateAll()
         Property aProp;
         aProp.Name = rName;
         aProp.Type = cpo::uno::Type( field.second->getTypeClass(), field.second->getTypeName() );
-        const bool bIsStruct = aProp.Type.getTypeClass() == css::uno::TypeClass_STRUCT;
+        const bool bIsStruct = aProp.Type.getTypeClass() == cpo::uno::TypeClass_STRUCT;
         SbUnoProperty* pProp = new SbUnoProperty( rName, eSbxType, eRealSbxType, std::move(aProp), 0, false, bIsStruct );
         SbxVariableRef xVarRef = pProp;
         QuickInsert( xVarRef.get() );

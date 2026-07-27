@@ -32,7 +32,6 @@
 #include <com/sun/star/lang/IndexOutOfBoundsException.hpp>
 #include <com/sun/star/rendering/CompositeOperation.hpp>
 #include <com/sun/star/rendering/FontRequest.hpp>
-#include <com/sun/star/rendering/IntegerBitmapLayout.hpp>
 #include <com/sun/star/rendering/PathCapType.hpp>
 #include <com/sun/star/rendering/PathJoinType.hpp>
 #include <com/sun/star/rendering/RenderState.hpp>
@@ -495,75 +494,6 @@ namespace canvastools
 #endif
         }
 
-        void verifyInput( const rendering::IntegerBitmapLayout&     bitmapLayout,
-                          const char*                               pStr,
-                          const uno::Reference< uno::XInterface >&  xIf,
-                          ::sal_Int16                               nArgPos )
-        {
-            if( bitmapLayout.ScanLines < 0 )
-            {
-#if OSL_DEBUG_LEVEL > 0
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii(pStr) +
-                    ": verifyInput(): bitmap layout's ScanLines is negative",
-                    xIf, nArgPos );
-#else
-                (void)pStr; (void)xIf; (void)nArgPos;
-                throw lang::IllegalArgumentException();
-#endif
-            }
-
-            if( bitmapLayout.ScanLineBytes < 0 )
-            {
-#if OSL_DEBUG_LEVEL > 0
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii(pStr) +
-                    ": verifyInput(): bitmap layout's ScanLineBytes is negative",
-                    xIf, nArgPos );
-#else
-                throw lang::IllegalArgumentException();
-#endif
-            }
-
-            if( !bitmapLayout.ColorSpace.is() )
-            {
-#if OSL_DEBUG_LEVEL > 0
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii(pStr) +
-                    ": verifyInput(): bitmap layout's ColorSpace is invalid",
-                    xIf, nArgPos );
-#else
-                throw lang::IllegalArgumentException();
-#endif
-            }
-            if( bitmapLayout.ColorSpace->getBitsPerPixel() < 0 )
-            {
-#if OSL_DEBUG_LEVEL > 0
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii(pStr) +
-                    ": verifyInput(): bitmap layout's ColorSpace getBitsPerPixel() is negative",
-                    xIf, nArgPos );
-#else
-                throw lang::IllegalArgumentException();
-#endif
-            }
-
-            if( bitmapLayout.ColorSpace->getEndianness() >= util::Endianness::LITTLE &&
-                bitmapLayout.ColorSpace->getEndianness() <= util::Endianness::BIG )
-                return;
-
-#if OSL_DEBUG_LEVEL > 0
-            throw lang::IllegalArgumentException(
-                OUString::createFromAscii(pStr) +
-                ": verifyInput(): bitmap layout's ColorSpace getEndianness() value is out of range (" +
-                OUString::number(sal::static_int_cast<sal_Int32>(bitmapLayout.ColorSpace->getEndianness())) +
-                " not known)",
-                xIf, nArgPos );
-#else
-            throw lang::IllegalArgumentException();
-#endif
-        }
-
         void verifyInput( const rendering::FontRequest&             fontRequest,
                           const char*                               pStr,
                           const uno::Reference< uno::XInterface >&  xIf,
@@ -670,39 +600,6 @@ namespace canvastools
             throw lang::IllegalArgumentException();
 #endif
         }
-
-        void verifySpriteSize( const geometry::RealSize2D&              size,
-                               const char*                              pStr,
-                               const uno::Reference< uno::XInterface >& xIf )
-        {
-            if( size.Width <= 0.0 )
-            {
-#if OSL_DEBUG_LEVEL > 0
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii(pStr) +
-                    ": verifySpriteSize(): size has 0 or negative width (value: " +
-                    OUString::number(size.Width) + ")",
-                    xIf, 0 );
-#else
-                (void)pStr; (void)xIf;
-                throw lang::IllegalArgumentException();
-#endif
-            }
-
-            if( size.Height <= 0.0 )
-            {
-#if OSL_DEBUG_LEVEL > 0
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii(pStr) +
-                    ": verifySpriteSize(): size has 0 or negative height (value: " +
-                    OUString::number(size.Height) + ")",
-                    xIf, 0 );
-#else
-                throw lang::IllegalArgumentException();
-#endif
-            }
-        }
-
 
 } // namespace
 

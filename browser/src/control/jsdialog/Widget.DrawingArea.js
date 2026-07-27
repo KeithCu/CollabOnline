@@ -53,6 +53,8 @@ function _drawingAreaControl (parentContainer, data, builder) {
 
 		if (data.editText) {
 			wrapper.setAttribute('aria-label', data.editText);
+		} else if (data.aria && data.aria.label) {
+			wrapper.setAttribute('aria-label', data.aria.label);
 		}
 
 		if (data.text) {
@@ -73,6 +75,9 @@ function _drawingAreaControl (parentContainer, data, builder) {
 		if (!isNavigating) {
 			if (data.labelledBy) {
 				wrapper.setAttribute('aria-labelledby', data.labelledBy);
+			}
+			if (data.aria && data.aria.label) {
+				wrapper.setAttribute('aria-label', data.aria.label);
 			}
 			_setDescription(wrapper, data, imageId);
 		}
@@ -99,7 +104,41 @@ function _drawingAreaControl (parentContainer, data, builder) {
 			if (data.labelledBy) {
 				wrapper.setAttribute('aria-labelledby', data.labelledBy);
 			}
+			if (data.aria && data.aria.label) {
+				wrapper.setAttribute('aria-label', data.aria.label);
+			}
 			_setDescription(wrapper, data, imageId);
+		}
+	} else if (data.borders) {
+		var wrapper = _createDrawingAreaWrapper(container, data, builder, imageId, true);
+		wrapper.setAttribute('role', 'group');
+
+		var previousWrapper = document.getElementById(imageId);
+		var isNavigating = previousWrapper && previousWrapper === document.activeElement;
+		if (!isNavigating) {
+			if (data.labelledBy) {
+				wrapper.setAttribute('aria-labelledby', data.labelledBy);
+			}
+			_setDescription(wrapper, data, imageId);
+		}
+
+		var activeBorderId = null;
+		for (var i = 0; i < data.borders.length; i++) {
+			var border = data.borders[i];
+			var checkboxId = container.id + '-border-' + border.type;
+			var checkbox = window.L.DomUtil.create('span', 'visuallyhidden', wrapper);
+			checkbox.id = checkboxId;
+			checkbox.setAttribute('role', 'checkbox');
+			checkbox.setAttribute('aria-checked', border.show ? 'true' : 'false');
+			checkbox.textContent = border.name;
+
+			if (border.selected && activeBorderId === null) {
+				activeBorderId = checkboxId;
+			}
+		}
+
+		if (activeBorderId) {
+			wrapper.setAttribute('aria-activedescendant', activeBorderId);
 		}
 	} else {
 		var image = window.L.DomUtil.create('img', builder.options.cssClass + ' ui-drawing-area', container);
@@ -114,6 +153,9 @@ function _drawingAreaControl (parentContainer, data, builder) {
 			JSDialog.AddAltAttrOnFocusableImg(image, data, builder);
 			if (data.aria && data.aria.role) {
 				image.setAttribute('role', data.aria.role);
+			}
+			if (data.aria && data.aria.label) {
+				image.setAttribute('aria-label', data.aria.label);
 			}
 		} else {
 			image.alt = '';

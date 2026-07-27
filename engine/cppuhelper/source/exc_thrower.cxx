@@ -53,13 +53,13 @@ struct ExceptionThrower : public uno_Interface, XExceptionThrower
     }
 
     // XInterface
-    virtual Any SAL_CALL queryInterface( Type const & type ) override;
-    virtual void SAL_CALL acquire() noexcept override;
-    virtual void SAL_CALL release() noexcept override;
+    virtual Any queryInterface( Type const & type ) override;
+    virtual void acquire() noexcept override;
+    virtual void release() noexcept override;
 
     // XExceptionThrower
-    virtual void SAL_CALL throwException( Any const & exc ) override;
-    virtual void SAL_CALL rethrowException() override;
+    virtual void throwException( Any const & exc ) override;
+    virtual void rethrowException() override;
 };
 
 extern "C"
@@ -204,7 +204,7 @@ template <class E> void tryThrow(cpo::uno::Any const& aException)
 
 void lo_mobile_throwException(cpo::uno::Any const& aException)
 {
-    assert(aException.getValueTypeClass() == css::uno::TypeClass_EXCEPTION);
+    assert(aException.getValueTypeClass() == cpo::uno::TypeClass_EXCEPTION);
 
     tryThrow<css::ucb::InteractiveAugmentedIOException>(aException);
     tryThrow<css::ucb::NameClashException>(aException);
@@ -223,7 +223,7 @@ namespace cppu
 {
 
 
-void SAL_CALL throwException( Any const & exc )
+void throwException( Any const & exc )
 {
     if (exc.getValueTypeClass() != TypeClass_EXCEPTION)
     {
@@ -253,7 +253,7 @@ void SAL_CALL throwException( Any const & exc )
 }
 
 
-Any SAL_CALL getCaughtException()
+Any getCaughtException()
 {
     // why does this differ from RETHROW_FAKE_EXCEPTIONS?
 #if defined(ANDROID)

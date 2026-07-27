@@ -527,6 +527,7 @@ private:
     sal_uInt64              nXMLImportedFormulaCount;       // progress count during XML import
     sal_uInt16              nInterpretLevel;                // >0 if in interpreter
     sal_uInt16              nMacroInterpretLevel;           // >0 if macro in interpreter
+    sal_uInt16              nCallableInterpretLevel = 0;    // depth of nested callable (LAMBDA) evaluation
     sal_uInt16              nInterpreterTableOpLevel;       // >0 if in interpreter TableOp
 
     ScDocumentThreadSpecific maNonThreaded;
@@ -951,6 +952,14 @@ public:
     std::vector<const ScDBData*> GetAllNamedDBsInArea(const ScRange& rRange) const;
     void                         RefreshDirtyTableColumnNames();
     SC_DLLPUBLIC sc::ExternalDataMapper& GetExternalDataMapper();
+    /** True when the document holds at least one external data mapping. Checks
+        without creating the mapper, so it stays cheap for documents that have
+        none. */
+    SC_DLLPUBLIC bool HasDataProviderMappings() const;
+
+    /** True when the document holds anything that fetches content from outside
+        the document and so needs the user to agree before it updates. */
+    SC_DLLPUBLIC bool HasExternalLinks() const;
 
     SC_DLLPUBLIC const ScRangeData* GetRangeAtBlock( const ScRange& rBlock, OUString& rName,
                                                      bool* pSheetLocal = nullptr ) const;
@@ -1201,7 +1210,6 @@ public:
         on first call. */
     ScFormulaParserPool& GetFormulaParserPool() const;
 
-    bool            HasAreaLinks() const;
     void            UpdateExternalRefLinks(weld::Window* pWin);
     void            UpdateAreaLinks();
 
@@ -1900,7 +1908,8 @@ public:
         ScDocument* pRefUndoDoc, ScDocument* pClipDoc,
         bool bResetCut = true, bool bAsLink = false,
         bool bIncludeFiltered = true, bool bSkipEmptyCells = false,
-        const ScRangeList* pDestRanges = nullptr );
+        const ScRangeList* pDestRanges = nullptr,
+        bool bPreserveDestProtection = false );
 
     void                CopyMultiRangeFromClip(const ScAddress& rDestPos, const ScMarkData& rMark,
                                                InsertDeleteFlags nInsFlag, ScDocument* pClipDoc,
@@ -2690,6 +2699,17 @@ public:
                                 if ( nMacroInterpretLevel )
                                     nMacroInterpretLevel--;
                             }
+    sal_uInt16 GetCallableInterpretLevel() const { return nCallableInterpretLevel; }
+    void IncCallableInterpretLevel()
+    {
+        if (nCallableInterpretLevel < USHRT_MAX)
+            nCallableInterpretLevel++;
+    }
+    void DecCallableInterpretLevel()
+    {
+        if (nCallableInterpretLevel)
+            nCallableInterpretLevel--;
+    }
     bool                IsInInterpreterTableOp() const { return nInterpreterTableOpLevel != 0; }
     void                IncInterpreterTableOpLevel()
                             {

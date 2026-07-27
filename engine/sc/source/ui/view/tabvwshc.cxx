@@ -29,7 +29,10 @@
 #include <scres.hrc>
 #include <global.hxx>
 #include <scmod.hxx>
+#include <docsh.hxx>
 #include <document.hxx>
+#include <SheetView.hxx>
+#include <SheetViewManager.hxx>
 #include <uiitems.hxx>
 #include <namedlg.hxx>
 #include <namedefdlg.hxx>
@@ -552,7 +555,7 @@ css::uno::Reference<css::datatransfer::XTransferable2> ScTabViewShell::GetClipDa
 
 void ScTabViewShell::notifyAllViewsHeaderInvalidation(const SfxViewShell* pForViewShell, HeaderType eHeaderType, SCTAB nCurrentTabIndex)
 {
-    if (!comphelper::COKit::isActive())
+    if (!comphelper::COKit::isActive() || !pForViewShell)
         return;
 
     OString aPayload;
@@ -612,7 +615,7 @@ void ScTabViewShell::notifyAllViewsSheetGeomInvalidation(const SfxViewShell* pFo
                                                          bool bRows, bool bSizes, bool bHidden, bool bFiltered,
                                                          bool bGroups, SCTAB nCurrentTabIndex)
 {
-    if (!comphelper::COKit::isActive() ||
+    if (!comphelper::COKit::isActive() || !pForViewShell ||
             !comphelper::COKit::isCompatFlagSet(
                 comphelper::COKit::Compat::scPrintTwipsMsgs))
         return;
@@ -649,6 +652,56 @@ void ScTabViewShell::notifyAllViewsSheetGeomInvalidation(const SfxViewShell* pFo
             pViewShell->viewCallback(KIT_CALLBACK_INVALIDATE_SHEET_GEOMETRY, aPayload);
         }
         pViewShell = SfxViewShell::GetNext(*pViewShell);
+    }
+}
+
+void ScTabViewShell::invalidateAllViewsKitPositions(const SfxViewShell* pForViewShell,
+                                                    bool bColumns, SCTAB nTab, SCCOLROW nStart)
+{
+    if (!comphelper::COKit::isActive() || !pForViewShell)
+        return;
+
+    SfxViewShell* pViewShell = SfxViewShell::GetFirst();
+    while (pViewShell)
+    {
+        ScTabViewShell* pTabViewShell = dynamic_cast<ScTabViewShell*>(pViewShell);
+        if (pTabViewShell && pTabViewShell->GetDocId() == pForViewShell->GetDocId())
+        {
+            ScViewData& rViewData = pTabViewShell->GetViewData();
+            ScPositionHelper* pPosHelper = bColumns ? rViewData.GetKitWidthHelper(nTab)
+                                                    : rViewData.GetKitHeightHelper(nTab);
+            if (pPosHelper)
+                pPosHelper->invalidateByIndex(nStart);
+        }
+        pViewShell = SfxViewShell::GetNext(*pViewShell);
+    }
+}
+
+void ScTabViewShell::invalidateAllViewsKitSheetViewPositions(ScDocShell& rDocShell,
+                                                             SCTAB nDefaultViewTab)
+{
+    if (!comphelper::COKit::isActive())
+        return;
+
+    std::shared_ptr<sc::SheetViewManager> pManager
+        = rDocShell.GetDocument().GetSheetViewManager(nDefaultViewTab);
+    if (!pManager || pManager->isEmpty())
+        return;
+
+    SfxViewShell* pForViewShell = rDocShell.GetBestViewShell(false);
+    if (!pForViewShell)
+        return;
+
+    for (auto const& rSheetView : pManager->iterateValidSheetViews())
+    {
+        SCTAB nSheetViewTab = rSheetView.getTableNumber();
+        invalidateAllViewsKitPositions(pForViewShell, /*bColumns=*/true, nSheetViewTab, 0);
+        invalidateAllViewsKitPositions(pForViewShell, /*bColumns=*/false, nSheetViewTab, 0);
+
+        notifyAllViewsSheetGeomInvalidation(pForViewShell, true /* bColumns */, true /* bRows */,
+                                            true /* bSizes */, true /* bHidden */,
+                                            true /* bFiltered */, true /* bGroups */,
+                                            nSheetViewTab);
     }
 }
 

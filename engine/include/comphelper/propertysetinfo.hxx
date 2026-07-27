@@ -65,11 +65,11 @@ struct PropertyMapEntry
         // Verify that if METRIC_ITEM is set, we are one of the types supported by
         // SvxUnoConvertToMM.
         assert(!(_nMoreFlags & PropertyMoreFlags::METRIC_ITEM) ||
-            ( (maType.getTypeClass() == css::uno::TypeClass_BYTE)
-              || (maType.getTypeClass() == css::uno::TypeClass_SHORT)
-              || (maType.getTypeClass() == css::uno::TypeClass_UNSIGNED_SHORT)
-              || (maType.getTypeClass() == css::uno::TypeClass_LONG)
-              || (maType.getTypeClass() == css::uno::TypeClass_UNSIGNED_LONG)
+            ( (maType.getTypeClass() == cpo::uno::TypeClass_BYTE)
+              || (maType.getTypeClass() == cpo::uno::TypeClass_SHORT)
+              || (maType.getTypeClass() == cpo::uno::TypeClass_UNSIGNED_SHORT)
+              || (maType.getTypeClass() == cpo::uno::TypeClass_LONG)
+              || (maType.getTypeClass() == cpo::uno::TypeClass_UNSIGNED_LONG)
             ) );
     }
     PropertyMapEntry() = default;
@@ -106,9 +106,9 @@ public:
     /** removes an already added PropertyMapEntry which string in mpName equals to aName */
     void remove( const OUString& aName ) noexcept;
 
-    virtual cpo::uno::Sequence< css::beans::Property > SAL_CALL getProperties() override;
-    virtual css::beans::Property SAL_CALL getPropertyByName( const OUString& aName ) override;
-    virtual bool SAL_CALL hasPropertyByName( const OUString& Name ) override;
+    virtual cpo::uno::Sequence< css::beans::Property > getProperties() override;
+    virtual css::beans::Property getPropertyByName( const OUString& aName ) override;
+    virtual bool hasPropertyByName( const OUString& Name ) override;
 
 private:
     PropertyMap maPropertyMap;

@@ -10,7 +10,6 @@
 #include "kitclipboard.hxx"
 #include <algorithm>
 #include <cstdlib>
-#include <cstring>
 #include <unordered_map>
 #include <comphelper/kit.hxx>
 #include <comphelper/sequence.hxx>
@@ -29,6 +28,7 @@ using namespace css::uno;
 using namespace cpo::uno;
 
 /* static */ osl::Mutex KitClipboardFactory::gMutex;
+/* static */ bool KitClipboardFactory::gHasGlobalProvider = false;
 static tools::DeleteOnDeinit<std::unordered_map<int, rtl::Reference<KitClipboard>>>& getClipboards()
 {
     static tools::DeleteOnDeinit<std::unordered_map<int, rtl::Reference<KitClipboard>>>
@@ -38,6 +38,22 @@ static tools::DeleteOnDeinit<std::unordered_map<int, rtl::Reference<KitClipboard
 
 rtl::Reference<KitClipboard> KitClipboardFactory::getClipboardForCurView()
 {
+    {
+        osl::MutexGuard aGuard(gMutex);
+        if (gHasGlobalProvider)
+        {
+            // One clipboard for every view and document (the desktop app).
+            auto& gClipboards = getClipboards();
+            auto it = gClipboards.get()->find(SHARED_VIEW_KEY);
+            if (it != gClipboards.get()->end())
+                return it->second;
+            rtl::Reference<KitClipboard> xClip(new KitClipboard());
+            (*gClipboards.get())[SHARED_VIEW_KEY] = xClip;
+            SAL_INFO("kit", "Created shared clipboard " << xClip.get());
+            return xClip;
+        }
+    }
+
     int nViewId = KitHelper::getCurrentView(); // currently active.
 
     osl::MutexGuard aGuard(gMutex);
@@ -74,6 +90,9 @@ void KitClipboardFactory::releaseClipboardForView(int nViewId)
 {
     osl::MutexGuard aGuard(gMutex);
 
+    if (gHasGlobalProvider)
+        return; // the shared clipboard is process-global, not per-view
+
     auto* pClipboards = getClipboards().get();
     if (!pClipboards)
         return;
@@ -90,6 +109,9 @@ void KitClipboardFactory::releaseClipboardsForDocument(int nDocId)
 {
     osl::MutexGuard aGuard(gMutex);
 
+    if (gHasGlobalProvider)
+        return; // the shared clipboard is process-global, not per-document
+
     auto* pClipboards = getClipboards().get();
     if (!pClipboards)
         return;
@@ -99,8 +121,56 @@ void KitClipboardFactory::releaseClipboardsForDocument(int nDocId)
     SAL_INFO("kit", "Released clipboards for destroyed document " << nDocId);
 }
 
+void KitClipboardFactory::installGlobalProvider(const COKitClipboardProvider* pProvider)
+{
+    osl::MutexGuard aGuard(gMutex);
+
+    auto& gClipboards = getClipboards();
+    if (pProvider)
+    {
+        gHasGlobalProvider = true;
+        auto& xShared = (*gClipboards.get())[SHARED_VIEW_KEY];
+        if (!xShared.is())
+            xShared = new KitClipboard();
+        xShared->setProvider(pProvider);
+        SAL_INFO("kit", "Installed global clipboard provider; shared clipboard " << xShared.get());
+    }
+    else
+    {
+        if (auto* pClipboards = gClipboards.get())
+        {
+            auto it = pClipboards->find(SHARED_VIEW_KEY);
+            if (it != pClipboards->end())
+            {
+                it->second->setProvider(nullptr);
+                pClipboards->erase(it);
+            }
+        }
+        gHasGlobalProvider = false;
+        SAL_INFO("kit", "Removed global clipboard provider; back to per-view clipboards");
+    }
+}
+
+void KitClipboardFactory::flushSharedClipboard()
+{
+    rtl::Reference<KitClipboard> xShared;
+    {
+        osl::MutexGuard aGuard(gMutex);
+        if (!gHasGlobalProvider)
+            return;
+        if (auto* pClipboards = getClipboards().get())
+        {
+            auto it = pClipboards->find(SHARED_VIEW_KEY);
+            if (it != pClipboards->end())
+                xShared = it->second;
+        }
+    }
+    if (xShared.is())
+        xShared->flushContents();
+}
+
 uno::Reference<uno::XInterface>
-    SAL_CALL KitClipboardFactory::createInstanceWithArguments(const Sequence<Any>& /* rArgs */)
+    KitClipboardFactory::createInstanceWithArguments(const Sequence<Any>& /* rArgs */)
 {
     return { static_cast<cppu::OWeakObject*>(getClipboardForCurView().get()) };
 }
@@ -125,19 +195,42 @@ KitClipboard::~KitClipboard() { setProvider(nullptr); }
 void KitClipboard::setProvider(const COKitClipboardProvider* pProvider)
 {
     osl::MutexGuard aGuard(m_aMutex);
-    if (m_oProvider && m_oProvider->release)
-        m_oProvider->release(m_oProvider->pUserData);
     if (pProvider)
-    {
-        // Copy only what the caller actually filled in (its nSize), leaving any
-        // fields a future engine adds zeroed. Keeps an older app's smaller struct
-        // safe to read.
-        COKitClipboardProvider aCopy{};
-        std::memcpy(&aCopy, pProvider, std::min(pProvider->nSize, sizeof(aCopy)));
-        m_oProvider = aCopy;
-    }
+        m_oProvider = *pProvider;
     else
         m_oProvider.reset();
+}
+
+void KitClipboard::flushContents()
+{
+    Reference<css::datatransfer::XTransferable> xTrans;
+    {
+        osl::MutexGuard aGuard(m_aMutex);
+        xTrans = m_xTransferable;
+    }
+    if (!xTrans.is())
+        return;
+
+    // Pull every format once. For a lazy transferable (Writer, Impress) this
+    // builds its own clip document, so it keeps working after its source
+    // document is gone; a self-contained one (Calc) is unaffected.
+    try
+    {
+        const auto aFlavors = xTrans->getTransferDataFlavors();
+        for (const auto& rFlavor : aFlavors)
+        {
+            try
+            {
+                xTrans->getTransferData(rFlavor);
+            }
+            catch (const uno::Exception&)
+            {
+            }
+        }
+    }
+    catch (const uno::Exception&)
+    {
+    }
 }
 
 Sequence<OUString> KitClipboard::getSupportedServiceNames_static()
@@ -170,7 +263,7 @@ Reference<css::datatransfer::XTransferable> KitClipboard::getContents()
     if (m_oProvider && m_oProvider->getMimeTypes && m_oProvider->getDataForMimeType)
     {
         const bool bOurs = m_oProvider->ownsClipboard
-                           && m_oProvider->ownsClipboard(m_oProvider->pUserData) != 0;
+                           && m_oProvider->ownsClipboard() != 0;
         if (!bOurs)
             return new KitProviderTransferable(*m_oProvider);
     }
@@ -204,7 +297,11 @@ void KitClipboard::setContents(
     // Emit here rather than from SfxClipboardChangeListener: the listener can
     // attach to the pre-Kit default clipboard before the per-view Kit clipboard
     // lands on the window frame, and then miss every real copy.
-    if (!xTrans.is() || !comphelper::COKit::isActive() || m_nViewId < 0)
+    // A real copy needs either a view to notify (the collaborative server) or a
+    // provider to advertise to (the desktop app); the shared clipboard used by
+    // the desktop app has no single view of its own.
+    const bool bHasProvider = m_oProvider && m_oProvider->advertiseToPlatform;
+    if (!xTrans.is() || !comphelper::COKit::isActive() || (m_nViewId < 0 && !bHasProvider))
         return;
 
     std::vector<OString> aMimeTypes;
@@ -238,7 +335,7 @@ void KitClipboard::setContents(
         for (const auto& rMime : aMimeTypes)
             aPtrs.push_back(rMime.getStr());
         aPtrs.push_back(nullptr);
-        m_oProvider->advertiseToPlatform(m_oProvider->pUserData, aPtrs.data());
+        m_oProvider->advertiseToPlatform(aPtrs.data());
         return;
     }
 
@@ -338,7 +435,7 @@ KitTransferable::KitTransferable(const size_t nInCount, const char** pInMimeType
     }
 }
 
-cpo::uno::Any SAL_CALL KitTransferable::getTransferData(const datatransfer::DataFlavor& rFlavor)
+cpo::uno::Any KitTransferable::getTransferData(const datatransfer::DataFlavor& rFlavor)
 {
     assert(m_aContent.size() == static_cast<size_t>(m_aFlavors.getLength()));
     for (size_t i = 0; i < m_aContent.size(); ++i)
@@ -353,12 +450,12 @@ cpo::uno::Any SAL_CALL KitTransferable::getTransferData(const datatransfer::Data
     return {};
 }
 
-cpo::uno::Sequence<datatransfer::DataFlavor> SAL_CALL KitTransferable::getTransferDataFlavors()
+cpo::uno::Sequence<datatransfer::DataFlavor> KitTransferable::getTransferDataFlavors()
 {
     return m_aFlavors;
 }
 
-bool SAL_CALL KitTransferable::isDataFlavorSupported(const datatransfer::DataFlavor& rFlavor)
+bool KitTransferable::isDataFlavorSupported(const datatransfer::DataFlavor& rFlavor)
 {
     return std::find_if(std::cbegin(m_aFlavors), std::cend(m_aFlavors),
                         [&rFlavor](const datatransfer::DataFlavor& i) {
@@ -371,8 +468,7 @@ KitProviderTransferable::KitProviderTransferable(const COKitClipboardProvider& r
     : m_aProvider(rProvider)
 {
     std::vector<datatransfer::DataFlavor> aFlavors;
-    char** ppMimeTypes = m_aProvider.getMimeTypes ? m_aProvider.getMimeTypes(m_aProvider.pUserData)
-                                                  : nullptr;
+    char** ppMimeTypes = m_aProvider.getMimeTypes ? m_aProvider.getMimeTypes() : nullptr;
     if (ppMimeTypes)
     {
         for (size_t i = 0; ppMimeTypes[i]; ++i)
@@ -394,7 +490,7 @@ KitProviderTransferable::KitProviderTransferable(const COKitClipboardProvider& r
     m_aFlavors = comphelper::containerToSequence(aFlavors);
 }
 
-cpo::uno::Any SAL_CALL KitProviderTransferable::getTransferData(const datatransfer::DataFlavor& rFlavor)
+cpo::uno::Any KitProviderTransferable::getTransferData(const datatransfer::DataFlavor& rFlavor)
 {
     auto itCache = m_aCache.find(rFlavor.MimeType);
     if (itCache != m_aCache.end())
@@ -419,7 +515,7 @@ cpo::uno::Any SAL_CALL KitProviderTransferable::getTransferData(const datatransf
     char* pData = nullptr;
     size_t nSize = 0;
     const int nOk
-        = m_aProvider.getDataForMimeType(m_aProvider.pUserData, aWireMime.getStr(), &pData, &nSize);
+        = m_aProvider.getDataForMimeType(aWireMime.getStr(), &pData, &nSize);
 
     if (nSavedView >= 0 && KitHelper::getCurrentView() != nSavedView)
         KitHelper::setView(nSavedView);
@@ -438,12 +534,12 @@ cpo::uno::Any SAL_CALL KitProviderTransferable::getTransferData(const datatransf
     return aRet;
 }
 
-cpo::uno::Sequence<datatransfer::DataFlavor> SAL_CALL KitProviderTransferable::getTransferDataFlavors()
+cpo::uno::Sequence<datatransfer::DataFlavor> KitProviderTransferable::getTransferDataFlavors()
 {
     return m_aFlavors;
 }
 
-bool SAL_CALL
+bool
 KitProviderTransferable::isDataFlavorSupported(const datatransfer::DataFlavor& rFlavor)
 {
     return std::any_of(std::cbegin(m_aFlavors), std::cend(m_aFlavors),

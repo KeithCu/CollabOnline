@@ -20,7 +20,7 @@
 #pragma once
 
 #include <cpo/uno/Sequence.hxx>
-#include <cppcanvas/color.hxx>
+#include "color.hxx"
 
 namespace cppcanvastools
     {

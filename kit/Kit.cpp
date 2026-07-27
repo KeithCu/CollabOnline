@@ -1330,6 +1330,10 @@ bool Document::onLoad(const std::string& sessionId,
     {
         if (load(session, renderOpts))
         {
+            if (_legacyUnoApiSeen)
+            {
+                session->sendTextFrame("legacyunoapinotice:");
+            }
             return true;
         }
     }
@@ -2715,6 +2719,20 @@ void Document::drainQueue()
             }
             // if priority is low - do one render, then process more events.
         }
+
+        // Forward any "legacy UNO API use" notice set by Basic or Python macros during this drain
+        // to all attached sessions of this document, so every collaborator sees the deprecation
+        // snackbar for a script that runs on the shared document (the sticky _legacyUnoApiSeen bit
+        // lets sessions joining after the notice fired, e.g. a doc's OnLoad macro that runs once
+        // per kit lifetime, still receive the notice, in onLoad below):
+        if (_loKit->takeLegacyUnoApiUseFlag())
+        {
+            _legacyUnoApiSeen = true;
+            for (auto const & [id, session] : _sessions)
+            {
+                session->sendTextFrame("legacyunoapinotice:");
+            }
+        }
     }
     catch (const std::exception& exc)
     {
@@ -3530,6 +3548,13 @@ void startMainLoop(const COKit* kit, const std::shared_ptr<kit::Office>& loKit, 
     loKit->registerRevealInFileManagerCallback(reveal_in_file_manager);
 #endif
 
+    // The desktop apps use one process-shared clipboard, so closing a document
+    // does not have to serialize the clipboard onto the system clipboard. Qt
+    // keeps its own per-view provider for now.
+#if defined(MACOSAPP) || defined(_WIN32)
+    install_clipboard_provider(*loKit);
+#endif
+
     LOG_INF("Kit unipoll loop run");
 
     loKit->runLoop(pollCallback, wakeCallback, mainKit.get());
@@ -3855,7 +3880,15 @@ void lokit_main(
                     return false;
                 }
 
-                if (FileUtil::Stat("/nix/store").exists()) {
+                // Only relevant for a real Nix/NixOS build, where the engine
+                // (loTemplate) resolves its libraries through /nix/store. An
+                // FHS-packaged engine (e.g. /opt/collaboraoffice) is
+                // self-contained and preloaded before the chroot, so the jail
+                // does not need /nix/store even when the host/base image happens
+                // to be Nix-built. Skipping it there avoids a misleading failure
+                // log and keeps the base store out of the sandbox.
+                if (loTemplate.starts_with("/nix/store") &&
+                    FileUtil::Stat("/nix/store").exists()) {
                     // Bind-mount /nix/store to the jail as otherwise we will likely get missing fonts/etc.
                     // We won't quit if we fail (e.g. the non-nixos case could work) but unless we're doing something special COOLWSD is unlikely to work without this on nixos
                     const std::string jailNixDir = Poco::Path(jailPath, "nix/store").toString();
@@ -3869,36 +3902,67 @@ void lokit_main(
 
                 if (!configId.empty())
                 {
-                    // mount the shared autotext over the lo shared autotext's 'common' dir
-                    if (!JailUtil::bind(sharedAutotext, loJailDestAutotextPath)
-                        || !JailUtil::remountReadonly(sharedAutotext, loJailDestAutotextPath))
+                    // Overlay the WOPI host's shared presets onto the engine's
+                    // preset dirs. This is best-effort: a preset the host did not
+                    // configure (empty source - the common case, the host merely
+                    // sets a configId), or one whose target dir the engine does
+                    // not ship (e.g. presnt after --without-templates), is
+                    // skipped. It must never fail the whole jail mount: that
+                    // disables bind-mounting for the entire forkit and pushes
+                    // every document onto the slow copy path.
+
+                    // The shared wordbook is overlaid onto the engine's own
+                    // share/wordbook, whose bundled dictionaries a bind mount
+                    // would hide - unlike the copy path, which merges into the
+                    // already-populated dir. Seed the shared wordbook with the
+                    // bundled dictionaries first so the overlay stays additive
+                    // and both jail-setup modes behave the same. A name the
+                    // host already provides is left untouched.
+                    if (!FileUtil::isEmptyDirectory(sharedWordbook))
                     {
-                        // TODO: actually do this link on failure
-                        LOG_WRN("Failed to mount [" << sharedAutotext << "] -> ["
-                                                    << loJailDestAutotextPath
-                                                    << "], will link contents");
-                        return false;
+                        const std::string bundledWordbook =
+                            Poco::Path(loTemplate, "share/wordbook").toString();
+                        try
+                        {
+                            std::vector<std::string> names;
+                            Poco::File(bundledWordbook).list(names);
+                            for (const auto& name : names)
+                            {
+                                const std::string src = Poco::Path(bundledWordbook, name).toString();
+                                const std::string dst = Poco::Path(sharedWordbook, name).toString();
+                                if (Poco::File(src).isFile() && !FileUtil::Stat(dst).exists())
+                                    FileUtil::copy(src, dst, /*log=*/false, /*throw_on_error=*/false);
+                            }
+                        }
+                        catch (const Poco::Exception& e)
+                        {
+                            LOG_WRN("Could not seed shared wordbook with bundled "
+                                    "dictionaries: " << e.displayText());
+                        }
                     }
 
-                    // mount the shared wordbook over the lo shared wordbook
-                    if (!JailUtil::bind(sharedWordbook, loJailDestWordbookPath)
-                        || !JailUtil::remountReadonly(sharedWordbook, loJailDestWordbookPath))
+                    const std::pair<std::string, std::string> presets[] = {
+                        { sharedAutotext, loJailDestAutotextPath },
+                        { sharedWordbook, loJailDestWordbookPath },
+                        { sharedTemplate, loJailDestImpressTemplatePath },
+                    };
+                    for (const auto& [presetSrc, presetDst] : presets)
                     {
-                        // TODO: actually do this link on failure
-                        LOG_WRN("Failed to mount [" << sharedWordbook << "] -> [" << loJailDestWordbookPath
-                                                    << "], will link contents");
-                        return false;
+                        if (FileUtil::isEmptyDirectory(presetSrc))
+                            continue; // nothing configured for this preset
 
-                    }
+                        if (!FileUtil::Stat(presetDst).exists())
+                        {
+                            LOG_WRN("Cannot apply shared preset [" << presetSrc
+                                    << "]: target [" << presetDst
+                                    << "] is not provided by the engine.");
+                            continue;
+                        }
 
-                    // mount the shared templates over the lo shared templates' 'common' dir
-                    if (!JailUtil::bind(sharedTemplate, loJailDestImpressTemplatePath) ||
-                        !JailUtil::remountReadonly(sharedTemplate, loJailDestImpressTemplatePath))
-                    {
-                        LOG_WRN("Failed to mount [" << sharedTemplate << "] -> ["
-                                                    << loJailDestImpressTemplatePath
-                                                    << "], will link contents");
-                        return false;
+                        if (!JailUtil::bind(presetSrc, presetDst) ||
+                            !JailUtil::remountReadonly(presetSrc, presetDst))
+                            LOG_WRN("Failed to mount shared preset [" << presetSrc
+                                    << "] -> [" << presetDst << "], skipping.");
                     }
                 }
 
@@ -3999,8 +4063,20 @@ void lokit_main(
                 linkOrCopy(loTemplate, loJailDestPath, linkablePath, LinkOrCopyType::LO);
 
                 if (!configId.empty())
-                    linkOrCopy(sharedTemplate, loJailDestImpressTemplatePath + "/", linkablePath,
-                               LinkOrCopyType::All);
+                {
+                    // Only copy presets the host actually configured; an empty
+                    // source would just make the overlayfs probe stat a
+                    // not-yet-created target and log spuriously.
+                    if (!FileUtil::isEmptyDirectory(sharedAutotext))
+                        linkOrCopy(sharedAutotext, loJailDestAutotextPath + "/", linkablePath,
+                                   LinkOrCopyType::All);
+                    if (!FileUtil::isEmptyDirectory(sharedWordbook))
+                        linkOrCopy(sharedWordbook, loJailDestWordbookPath + "/", linkablePath,
+                                   LinkOrCopyType::All);
+                    if (!FileUtil::isEmptyDirectory(sharedTemplate))
+                        linkOrCopy(sharedTemplate, loJailDestImpressTemplatePath + "/", linkablePath,
+                                   LinkOrCopyType::All);
+                }
 
 #if CODE_COVERAGE
                 // Link the .gcda files.

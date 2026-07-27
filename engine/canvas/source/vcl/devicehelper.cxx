@@ -20,14 +20,14 @@
 #include <sal/config.h>
 
 #include <basegfx/utils/canvastools.hxx>
-#include <basegfx/utils/unopolypolygon.hxx>
 #include <canvas/canvastools.hxx>
 #include <tools/stream.hxx>
 #include <vcl/canvastools.hxx>
 #include <vcl/dibtools.hxx>
 
 #include "canvasbitmap.hxx"
-#include "devicehelper.hxx"
+#include <devicehelper.hxx>
+#include <unopolypolygon.hxx>
 
 using namespace ::com::sun::star;
 
@@ -41,36 +41,6 @@ namespace vclcanvas
         mpOutDev = rOutDev;
     }
 
-    geometry::RealSize2D DeviceHelper::getPhysicalResolution()
-    {
-        if( !mpOutDev )
-            return ::canvastools::createInfiniteSize2D(); // we're disposed
-
-        // Map a one-by-one millimeter box to pixel
-        OutputDevice& rOutDev = mpOutDev->getOutDev();
-        const MapMode aOldMapMode( rOutDev.GetMapMode() );
-        rOutDev.SetMapMode( MapMode(MapUnit::MapMM) );
-        const Size aPixelSize( rOutDev.LogicToPixel(Size(1,1)) );
-        rOutDev.SetMapMode( aOldMapMode );
-
-        return vcl::unotools::size2DFromSize( aPixelSize );
-    }
-
-    geometry::RealSize2D DeviceHelper::getPhysicalSize()
-    {
-        if( !mpOutDev )
-            return ::canvastools::createInfiniteSize2D(); // we're disposed
-
-        // Map the pixel dimensions of the output window to millimeter
-        OutputDevice& rOutDev = mpOutDev->getOutDev();
-        const MapMode aOldMapMode( rOutDev.GetMapMode() );
-        rOutDev.SetMapMode( MapMode(MapUnit::MapMM) );
-        const Size aLogSize( rOutDev.PixelToLogic(rOutDev.GetOutputSizePixel()) );
-        rOutDev.SetMapMode( aOldMapMode );
-
-        return vcl::unotools::size2DFromSize( aLogSize );
-    }
-
     uno::Reference< rendering::XLinePolyPolygon2D > DeviceHelper::createCompatibleLinePolyPolygon(
         const uno::Reference< rendering::XGraphicDevice >&              ,
         const cpo::uno::Sequence< cpo::uno::Sequence< geometry::RealPoint2D > >&  points )
@@ -79,7 +49,7 @@ namespace vclcanvas
         if( !mpOutDev )
             return xPoly; // we're disposed
 
-        xPoly.set( new ::basegfx::unotools::UnoPolyPolygon(
+        xPoly.set( new ::canvastools::UnoPolyPolygon(
                        ::basegfx::unotools::polyPolygonFromPoint2DSequenceSequence( points ) ) );
         // vcl only handles even_odd polygons
         xPoly->setFillRule(rendering::FillRule_EVEN_ODD);
@@ -95,33 +65,12 @@ namespace vclcanvas
         if( !mpOutDev )
             return xPoly; // we're disposed
 
-        xPoly.set( new ::basegfx::unotools::UnoPolyPolygon(
+        xPoly.set( new ::canvastools::UnoPolyPolygon(
                        ::basegfx::unotools::polyPolygonFromBezier2DSequenceSequence( points ) ) );
         // vcl only handles even_odd polygons
         xPoly->setFillRule(rendering::FillRule_EVEN_ODD);
 
         return xPoly;
-    }
-
-    uno::Reference< rendering::XBitmap > DeviceHelper::createCompatibleBitmap(
-        const uno::Reference< rendering::XGraphicDevice >& rDevice,
-        const geometry::IntegerSize2D&                     size )
-    {
-        if( !mpOutDev )
-            return uno::Reference< rendering::XBitmap >(); // we're disposed
-
-        return uno::Reference< rendering::XBitmap >(
-            new CanvasBitmap( vcl::unotools::sizeFromIntegerSize2D(size),
-                              false,
-                              *rDevice,
-                              mpOutDev ) );
-    }
-
-    uno::Reference< rendering::XVolatileBitmap > DeviceHelper::createVolatileBitmap(
-        const uno::Reference< rendering::XGraphicDevice >&  ,
-        const geometry::IntegerSize2D&                       )
-    {
-        return uno::Reference< rendering::XVolatileBitmap >();
     }
 
     uno::Reference< rendering::XBitmap > DeviceHelper::createCompatibleAlphaBitmap(
@@ -136,13 +85,6 @@ namespace vclcanvas
                               true,
                               *rDevice,
                               mpOutDev ) );
-    }
-
-    uno::Reference< rendering::XVolatileBitmap > DeviceHelper::createVolatileAlphaBitmap(
-        const uno::Reference< rendering::XGraphicDevice >&  ,
-        const geometry::IntegerSize2D&                       )
-    {
-        return uno::Reference< rendering::XVolatileBitmap >();
     }
 
     void DeviceHelper::disposing()
@@ -168,27 +110,6 @@ namespace vclcanvas
     cpo::uno::Any DeviceHelper::getSurfaceHandle() const
     {
         return getDeviceHandle();
-    }
-
-    namespace
-    {
-        uno::Reference<rendering::XColorSpace>& GetDeviceColorSpace()
-        {
-            static uno::Reference<rendering::XColorSpace> xColorSpace =
-            []()
-            {
-                auto xTmp = canvastools::getStdColorSpace();
-                assert( xTmp.is() );
-                return xTmp;
-            }();
-            return xColorSpace;
-        };
-    }
-
-    uno::Reference<rendering::XColorSpace> const & DeviceHelper::getColorSpace() const
-    {
-        // always the same
-        return GetDeviceColorSpace();
     }
 
     void DeviceHelper::dumpScreenContent() const

@@ -23,14 +23,14 @@
 #include <com/sun/star/rendering/XCachedPrimitive.hpp>
 
 #include <basegfx/matrix/b2dhommatrix.hxx>
-#include <cppcanvas/canvas.hxx>
+#include <canvas.hxx>
 
 #include <action.hxx>
 
 
-/* Definition of internal::CachedPrimitiveBase class */
+/* Definition of CachedPrimitiveBase class */
 
-namespace cppcanvas::internal
+namespace cppcanvas
     {
         /** Base class providing cached re-rendering, if XCanvas
             returns XCachedPrimitive

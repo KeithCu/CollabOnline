@@ -6,11 +6,15 @@
 
 #include <config.h>
 
+#include <cstdlib>
 #include <filesystem>
+#include <iostream>
+#include <memory>
 #include <ranges>
 #include <set>
 #include <string>
 
+#include <Poco/Path.h>
 #include <Poco/URI.h>
 
 #include <COKit/COKit.hxx>
@@ -38,7 +42,8 @@ static void convert(kit::Office* office, const std::string& input, std::set<std:
 
     try
     {
-        kit::Document* doc = office->documentLoad(Poco::URI(Poco::Path(input)).toString().c_str(), NULL /* options */);
+        std::unique_ptr<kit::Document> doc(
+            office->documentLoad(Poco::URI(Poco::Path(input)).toString().c_str(), NULL /* options */));
         if (!doc)
         {
             std::cerr << "Error: could not load document: " << office->getError() << "\n";
@@ -89,7 +94,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    kit::Office* office = NULL;
+    std::unique_ptr<kit::Office> office;
     try
     {
         std::string kit_path;
@@ -107,9 +112,13 @@ int main(int argc, char** argv)
 
 #else
 
+        // The engine installation configured at build time, the "program"
+        // folder of which holds the engine libraries.
+        kit_path = LO_PATH "/program";
+
 #endif
 
-        office = kit::kit_cpp_init(kit_path.c_str());
+        office.reset(kit::kit_cpp_init(kit_path.c_str()));
         if (!office)
         {
             std::cerr << "Error: could not initialize COKit\n";
@@ -119,13 +128,21 @@ int main(int argc, char** argv)
         std::set<std::string> outputFormats = parseCommaSeparatedList(argv[1]);
 
         for (int i = 2; i < argc; i++)
-            convert(office, argv[i], outputFormats);
+            convert(office.get(), argv[i], outputFormats);
 
-        return 0;
+        // Shut the engine down while its libraries are still fully loaded.
+        office.reset();
+
+        // The engine libraries register exit-time destructors that expect a
+        // kit session, which a command-line conversion never creates.
+        // std::_Exit ends the process without running them.
+        std::cout.flush();
+        std::_Exit(0);
     }
     catch (const std::exception& e)
     {
         std::cerr << "Error: COKit exception: " << e.what() << "\n";
+        return 1;
     }
 }
 

@@ -47,6 +47,10 @@ class Socket {
 	private _accessTokenExpireTimeout: TimeoutHdl | undefined;
 	private _accessTokenExpireWarningCount: number = 0;
 	private _reconnecting: boolean;
+	// External-content (linked graphics etc.) held back pending consent.
+	private _externalLinksDisabled: boolean = false;
+	private _externalLinksListening: boolean = false;
+	private _externalLinksShown: boolean = false;
 	private _slurpTimer: TimeoutHdl | undefined;
 	private _renderEventTimer: TimeoutHdl | undefined;
 	private _renderEventTimerStart: DOMHighResTimeStamp | undefined;
@@ -456,7 +460,7 @@ class Socket {
 			msg += ' spellOnline=' + spellOnline;
 		}
 
-		const darkTheme = window.prefs.getBoolean('darkTheme');
+		const darkTheme = window.prefs.seedDarkModeDefault();
 		msg += ' darkTheme=' + darkTheme;
 
 		const darkBackground = window.prefs.getBoolean(
@@ -1143,7 +1147,26 @@ class Socket {
 	// Let the user agree to load this document's disabled external links.
 	// Editors only; the choice lasts the session.
 	private _maybeOfferExternalLinks(command: ServerCommand): void {
-		if (!command.externallinksdisabled || this._map.isReadOnlyMode()) return;
+		this._externalLinksDisabled = !!command.externallinksdisabled;
+		if (!this._externalLinksDisabled) return;
+
+		// The document loads read-only first, and this prompt is editors-only,
+		// so also offer once the permission changes to edit.
+		if (!this._externalLinksListening) {
+			this._externalLinksListening = true;
+			app.events.on('updatepermission', this._offerExternalLinks.bind(this));
+		}
+		this._offerExternalLinks();
+	}
+
+	private _offerExternalLinks(): void {
+		if (
+			this._externalLinksShown ||
+			!this._externalLinksDisabled ||
+			this._map.isReadOnlyMode()
+		)
+			return;
+		this._externalLinksShown = true;
 
 		this._map.uiManager.showSnackbar(
 			_('This document has links to external content.'),
@@ -1256,6 +1279,9 @@ class Socket {
 				app.console.error('Failed to parse proxycall: ' + ex);
 			}
 			return;
+		} else if (textMsg.startsWith('legacyunoapinotice:')) {
+			this._map.fire('legacyunoapinotice');
+			return;
 		} else if (textMsg.startsWith('perm:')) {
 			this._onPermMsg(textMsg);
 			return;
@@ -1353,8 +1379,16 @@ class Socket {
 		} else if (textMsg.startsWith('zstdslidelayer:')) {
 			this._onZstdSlideLayerMsg(textMsg, e);
 			return;
-		} else if (textMsg.startsWith('zstdvectorprimitives:')) {
-			this._onZstdVectorPrimitivesMsg(e);
+		} else if (
+			textMsg.startsWith('zstdvectorprimitives:') ||
+			textMsg.startsWith('zstdvectorprimitivesdelta:')
+		) {
+			// A pushed delta carries the same JSON as a pulled one, so it
+			// goes through the same handler, which routes by its type.
+			this._onZstdVectorPrimitivesMsg(
+				e,
+				textMsg.startsWith('zstdvectorprimitivesdelta:'),
+			);
 			return;
 		} else if (textMsg.startsWith('sliderenderingcomplete:')) {
 			this._onSlideRenderingCompleteMsg(textMsg, e);
@@ -1474,6 +1508,7 @@ class Socket {
 				e.data.startsWith('slidelayer:') ||
 				e.data.startsWith('zstdslidelayer:') ||
 				e.data.startsWith('zstdvectorprimitives:') ||
+				e.data.startsWith('zstdvectorprimitivesdelta:') ||
 				e.data.startsWith('windowpaint:')
 			) {
 				let index: number;
@@ -2552,14 +2587,35 @@ class Socket {
 	// command-values handler.
 	private _onZstdVectorPrimitivesMsg(
 		e: SlurpMessageEvent | MinimalMessageEvent,
+		pushed: boolean,
 	): void {
 		const event = e as SlurpMessageEvent;
 		if (!event.imgBytes || event.imgIndex === undefined) {
 			window.app.console.warn('zstdvectorprimitives with no payload');
 			return;
 		}
+		const compressed = event.imgBytes.subarray(event.imgIndex);
 		const json = new TextDecoder().decode(
-			(window as any).fzstd.decompress(event.imgBytes.subarray(event.imgIndex)),
+			(window as any).fzstd.decompress(compressed),
+		);
+		let summary =
+			compressed.length + ' bytes compressed, ' + json.length + ' bytes JSON';
+		try {
+			const parsed = JSON.parse(json);
+			summary +=
+				', type=' +
+				parsed.type +
+				', objects=' +
+				(parsed.objects ? parsed.objects.length : 0);
+			if (parsed.order) summary += ', order=' + parsed.order.length;
+		} catch (error) {
+			// Leave the summary as the sizes only.
+		}
+		window.app.console.log(
+			'zstdvectorprimitives ' +
+				(pushed ? 'PUSHED' : 'pulled') +
+				' payload: ' +
+				summary,
 		);
 		const docLayer = (this._map as any)?._docLayer;
 		if (docLayer && docLayer._onCommandValuesMsg)

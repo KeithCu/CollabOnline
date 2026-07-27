@@ -22,6 +22,8 @@
 #include <sal/log.hxx>
 #include <osl/diagnose.h>
 #include <comphelper/diagnose_ex.hxx>
+#include <comphelper/scopeguard.hxx>
+#include <comphelper/types.hxx>
 #include <tools/helpers.hxx>
 #include <tools/stream.hxx>
 #include <tools/vcompat.hxx>
@@ -43,8 +45,8 @@
 
 #include <com/sun/star/beans/XFastPropertySet.hpp>
 #include <com/sun/star/rendering/MtfRenderer.hpp>
-#include <com/sun/star/rendering/XBitmapCanvas.hpp>
 #include <com/sun/star/rendering/XCanvas.hpp>
+#include <com/sun/star/rendering/CanvasFactory.hpp>
 #include <comphelper/processfactory.hxx>
 
 using namespace com::sun::star;
@@ -393,41 +395,35 @@ bool GDIMetaFile::ImplPlayWithRenderer(OutputDevice& rOut, const Point& rPos, Si
 
     try
     {
-        uno::Reference<rendering::XCanvas> xCanvas = win->GetOutDev()->GetCanvas ();
-
+        const uno::Reference< uno::XComponentContext >& xContext = comphelper::getProcessComponentContext();
+        uno::Reference<rendering::XCanvas> xCanvas = css::rendering::CanvasFactory::create( xContext )->create(reinterpret_cast<sal_Int64>(win->GetOutDev()));
         if (!xCanvas.is())
             return false;
+        comphelper::ScopeGuard aCanvasScopeGuard([&xCanvas] {
+            comphelper::disposeComponent(xCanvas);
+        });
 
         Size aSize (rDestSize.Width () + 1, rDestSize.Height () + 1);
         uno::Reference<rendering::XBitmap> xBitmap = xCanvas->getDevice ()->createCompatibleAlphaBitmap (vcl::unotools::integerSize2DFromSize( aSize));
-        if( xBitmap.is () )
+        if( !xBitmap )
+            return false;
+
+        uno::Reference< rendering::XCanvas > xBitmapCanvas( xBitmap, uno::UNO_QUERY );
+        if( !xBitmapCanvas )
+            return false;
+
+        uno::Reference< rendering::XMtfRenderer > xMtfRenderer = rendering::MtfRenderer::create( xContext );
+        xBitmapCanvas->clear();
+        xMtfRenderer->draw( xBitmapCanvas, reinterpret_cast<sal_Int64>( this ), rDestSize.Width(), rDestSize.Height() );
+
+        Bitmap aBitmap = vcl::unotools::bitmapFromXBitmap(xBitmap);
+        if( !aBitmap.IsEmpty() )
         {
-            uno::Reference< rendering::XBitmapCanvas > xBitmapCanvas( xBitmap, uno::UNO_QUERY );
-            if( xBitmapCanvas.is() )
-            {
-                const uno::Reference< uno::XComponentContext >& xContext = comphelper::getProcessComponentContext();
-                uno::Reference< rendering::XMtfRenderer > xMtfRenderer = rendering::MtfRenderer::createWithBitmapCanvas( xContext, xBitmapCanvas );
-
-                xBitmapCanvas->clear();
-                uno::Reference< beans::XFastPropertySet > xMtfFastPropertySet( xMtfRenderer, uno::UNO_QUERY );
-                if( xMtfFastPropertySet.is() )
-                    // set this metafile to the renderer to
-                    // speedup things (instead of copying data to
-                    // sequence of bytes passed to renderer)
-                    xMtfFastPropertySet->setFastPropertyValue( 0, cpo::uno::Any( reinterpret_cast<sal_Int64>( this ) ) );
-
-                xMtfRenderer->draw( rDestSize.Width(), rDestSize.Height() );
-
-                Bitmap aBitmap;
-                if( aBitmap.Create( xBitmapCanvas, aSize ) )
-                {
-                    if (rOut.GetMapMode().GetMapUnit() == MapUnit::MapPixel)
-                        rOut.DrawBitmap( rPos, aBitmap );
-                    else
-                        rOut.DrawBitmap( rPos, rLogicDestSize, aBitmap );
-                    return true;
-                }
-            }
+            if (rOut.GetMapMode().GetMapUnit() == MapUnit::MapPixel)
+                rOut.DrawBitmap( rPos, aBitmap );
+            else
+                rOut.DrawBitmap( rPos, rLogicDestSize, aBitmap );
+            return true;
         }
     }
     catch (const uno::RuntimeException& )

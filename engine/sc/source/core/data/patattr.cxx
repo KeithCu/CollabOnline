@@ -858,17 +858,27 @@ void ScPatternAttr::fillColor(model::ComplexColor& rComplexColor, const SfxItemS
 
         if (SfxViewShell::Current())
         {
-            if (aBackColor.IsDark())
-                aColor = COL_WHITE;
-            else
-                aColor = COL_BLACK;
+            // Pick the automatic text color (black or white) with the higher
+            // contrast against the cell background. The crossover is at WCAG
+            // relative luminance 0.179 (0.179 * 255 ~= 46): darker backgrounds
+            // read better with white text, lighter ones with black. Note this
+            // deliberately does not use Color::IsDark(), whose threshold marks
+            // saturated mid-tone fills such as pure red as dark and would flip
+            // their text to white, unlike other spreadsheet applications.
+            aColor = aBackColor.GetWCAGLuminance() > 46 ? COL_BLACK : COL_WHITE;
         }
         else
         {
             aColor = aSysTextColor;
         }
     }
-    else if (svtools::ColorConfig::IsDarkMode())
+    // Lighten explicit dark colors for a dark background, but only for on-screen
+    // display. Raw returns the stored value unchanged (persistence/export), and
+    // Print keeps the real colors; otherwise the display-only light variant would
+    // be baked into the saved document.
+    else if (svtools::ColorConfig::IsDarkMode()
+             && eAutoMode != ScAutoFontColorMode::Raw
+             && eAutoMode != ScAutoFontColorMode::Print)
     {
         const SvxBrushItem* pItem
             = lcl_populateresult(ATTR_BACKGROUND, rItemSet, pCondSet, pTableSet);

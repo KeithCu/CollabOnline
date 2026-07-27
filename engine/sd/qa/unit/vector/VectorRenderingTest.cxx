@@ -18,16 +18,23 @@
 #include <com/sun/star/drawing/FillStyle.hpp>
 #include <com/sun/star/drawing/LineStyle.hpp>
 
+#include <svx/svdogrp.hxx>
 #include <svx/svdopage.hxx>
 #include <svx/svdpage.hxx>
 #include <svx/svdorect.hxx>
+#include <svx/svdview.hxx>
 #include <svx/xfillit0.hxx>
 #include <svx/xflclit.hxx>
 #include <svx/xfltrit.hxx>
 #include <svx/xlineit0.hxx>
 #include <svx/xlnclit.hxx>
 
+#include <editeng/editview.hxx>
+#include <editeng/outliner.hxx>
+#include <sfx2/viewsh.hxx>
+
 #include <DrawDocShell.hxx>
+#include <ViewShell.hxx>
 #include <drawdoc.hxx>
 #include <unomodel.hxx>
 
@@ -87,6 +94,23 @@ protected:
         pRect->SetMergedItem(XLineColorItem(OUString(), aStrokeColor));
 
         pPage->NbcInsertObject(pRect.get());
+    }
+
+    /// Add a group holding one filled rectangle to the first slide.
+    /// Returns the rectangle inside the group.
+    SdrObject* addGroupedRectangle(const tools::Rectangle& rRect, Color aFillColor)
+    {
+        SdrPage* pPage = page(1);
+        rtl::Reference<SdrRectObj> pRect = new SdrRectObj(pPage->getSdrModelFromSdrPage(), rRect);
+
+        pRect->SetMergedItem(XFillStyleItem(drawing::FillStyle_SOLID));
+        pRect->SetMergedItem(XFillColorItem(OUString(), aFillColor));
+        pRect->SetMergedItem(XLineStyleItem(drawing::LineStyle_NONE));
+
+        rtl::Reference<SdrObjGroup> pGroup = new SdrObjGroup(pPage->getSdrModelFromSdrPage());
+        pGroup->GetSubList()->NbcInsertObject(pRect.get());
+        pPage->NbcInsertObject(pGroup.get());
+        return pRect.get();
     }
 
     /// Add a page-object placeholder (slide embedded in slide) to the
@@ -168,15 +192,21 @@ protected:
         pPage->NbcInsertObject(pRect.get());
     }
 
-    /// Request for the first slide. The raw JSON is written as a reference.
-    tools::JsonPath getVectorPrimitives(std::u16string_view sName)
+    /// Request for the first slide. The raw JSON is written as a
+    /// reference. A non-negative nSince asks for a delta against that
+    /// version instead of the full slide.
+    tools::JsonPath getVectorPrimitives(std::u16string_view sName, sal_Int64 nSince = -1)
     {
         SdXImpressDocument* pDoc = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
         CPPUNIT_ASSERT(pDoc);
 
         tools::JsonWriter aJsonWriter;
-        // Explicitly get only part 0 -> first slide
-        pDoc->getCommandValues(aJsonWriter, ".uno:VectorPrimitives?part=0");
+        // Explicitly get only part 0 -> first slide.
+        OString aCommand = ".uno:VectorPrimitives?part=0"_ostr;
+        if (nSince >= 0)
+            aCommand = aCommand + "&since=" + OString::number(nSince);
+        pDoc->getCommandValues(aJsonWriter,
+                               std::string_view(aCommand.getStr(), aCommand.getLength()));
         OString aResult = aJsonWriter.finishAndGetAsOString();
         CPPUNIT_ASSERT(!aResult.isEmpty());
 
@@ -235,6 +265,225 @@ CPPUNIT_TEST_FIXTURE(VectorRenderingTest, testSingleRectangle)
     assertJsonPath(*oStroke, "type", "polygonStroke");
     assertJsonPath(*oStroke, "line/color", "#000000");
     assertJsonPathExists(*oStroke, "path");
+}
+
+CPPUNIT_TEST_FIXTURE(VectorRenderingTest, testPartVersionRisesOnObjectChange)
+{
+    // Changing an object on a slide must raise that slide's reported
+    // content version.
+    createBlankDoc();
+    addRectangle(tools::Rectangle(Point(5000, 5000), Size(5000, 3000)), Color(0x4472c4), COL_BLACK);
+
+    const sal_Int64 nBefore
+        = getVectorPrimitives(u"testPartVersion").getInt("/version").value_or(-1);
+
+    // The rectangle was inserted without a broadcast, so fire the
+    // object change the model would send on a real edit.
+    page(1)->GetObj(0)->BroadcastObjectChange();
+
+    const sal_Int64 nAfter
+        = getVectorPrimitives(u"testPartVersion").getInt("/version").value_or(-1);
+
+    CPPUNIT_ASSERT_EQUAL(nBefore + 1, nAfter);
+}
+
+CPPUNIT_TEST_FIXTURE(VectorRenderingTest, testPartVersionRisesOnMasterChange)
+{
+    // Changing an object on a slide master must raise the reported
+    // content version of the slide that uses that master.
+    createBlankDoc();
+    CPPUNIT_ASSERT(page(1)->TRG_HasMasterPage());
+
+    const sal_Int64 nBefore
+        = getVectorPrimitives(u"testMasterVersion").getInt("/version").value_or(-1);
+
+    // Put a rectangle on the master of the first slide and fire the
+    // object change the model would send on a real edit.
+    SdrPage& rMasterPage = page(1)->TRG_GetMasterPage();
+    rtl::Reference<SdrRectObj> pRect = new SdrRectObj(
+        rMasterPage.getSdrModelFromSdrPage(), tools::Rectangle(Point(0, 0), Size(4000, 2000)));
+    rMasterPage.NbcInsertObject(pRect.get());
+    pRect->BroadcastObjectChange();
+
+    const sal_Int64 nAfter
+        = getVectorPrimitives(u"testMasterVersion").getInt("/version").value_or(-1);
+
+    CPPUNIT_ASSERT_EQUAL(nBefore + 1, nAfter);
+}
+
+// A delta since a version carries full content only for objects that
+// changed after it, while the order array still lists every object.
+CPPUNIT_TEST_FIXTURE(VectorRenderingTest, testDeltaCarriesOnlyChangedObjects)
+{
+    createBlankDoc();
+    addRectangle(tools::Rectangle(Point(1000, 1000), Size(3000, 2000)), Color(0x4472c4), COL_BLACK);
+    addRectangle(tools::Rectangle(Point(6000, 1000), Size(3000, 2000)), Color(0xc00000), COL_BLACK);
+
+    SdrObject* pFirst = page(1)->GetObj(0);
+    // Register both objects as changed so the part has a known version.
+    pFirst->BroadcastObjectChange();
+    page(1)->GetObj(1)->BroadcastObjectChange();
+
+    auto aFull = getVectorPrimitives(u"testDeltaFull");
+    assertJsonPath(aFull, "/type", "vectorprimitives");
+    const sal_Int64 nVersion = aFull.getInt("/version").value_or(-1);
+    CPPUNIT_ASSERT_EQUAL(size_t(2), aFull.getSize("/objects").value_or(0));
+
+    // Change only the first object after that version.
+    pFirst->BroadcastObjectChange();
+
+    auto aDelta = getVectorPrimitives(u"testDeltaSince", nVersion);
+    assertJsonPath(aDelta, "/type", "vectorprimitivesdelta");
+    // The order still lists both objects, but only the changed one
+    // carries content.
+    CPPUNIT_ASSERT_EQUAL(size_t(2), aDelta.getSize("/order").value_or(0));
+    CPPUNIT_ASSERT_EQUAL(size_t(1), aDelta.getSize("/objects").value_or(0));
+    CPPUNIT_ASSERT_EQUAL(static_cast<sal_Int64>(pFirst->GetUniqueID()),
+                         aDelta.getInt("/objects/0/id").value_or(-1));
+}
+
+// A change to a shape inside a group must mark the top-level group as
+// changed, so a delta carries the group's new content.
+CPPUNIT_TEST_FIXTURE(VectorRenderingTest, testDeltaCarriesGroupOnMemberChange)
+{
+    createBlankDoc();
+    SdrObject* pMember = addGroupedRectangle(
+        tools::Rectangle(Point(1000, 1000), Size(3000, 2000)), Color(0x4472c4));
+    SdrObject* pGroup = page(1)->GetObj(0);
+    pGroup->BroadcastObjectChange();
+
+    const sal_Int64 nVersion
+        = getVectorPrimitives(u"testGroupFull").getInt("/version").value_or(-1);
+
+    // Change only the member inside the group after that version.
+    pMember->BroadcastObjectChange();
+
+    auto aDelta = getVectorPrimitives(u"testGroupDelta", nVersion);
+    assertJsonPath(aDelta, "/type", "vectorprimitivesdelta");
+    CPPUNIT_ASSERT_EQUAL(size_t(1), aDelta.getSize("/objects").value_or(0));
+    CPPUNIT_ASSERT_EQUAL(static_cast<sal_Int64>(pGroup->GetUniqueID()),
+                         aDelta.getInt("/objects/0/id").value_or(-1));
+}
+
+// A master-page change is not an object on the slide, so a delta whose
+// baseline predates it must carry the master page content.
+CPPUNIT_TEST_FIXTURE(VectorRenderingTest, testDeltaCarriesChangedMasterPage)
+{
+    createBlankDoc();
+    addRectangle(tools::Rectangle(Point(1000, 1000), Size(3000, 2000)), Color(0x4472c4), COL_BLACK);
+    page(1)->GetObj(0)->BroadcastObjectChange();
+
+    auto aFull = getVectorPrimitives(u"testMasterDeltaFull");
+    const sal_Int64 nVersion = aFull.getInt("/version").value_or(-1);
+
+    // Put a rectangle on the master after that version and fire the
+    // object change the model would send on a real edit.
+    SdrPage& rMasterPage = page(1)->TRG_GetMasterPage();
+    rtl::Reference<SdrRectObj> pRect = new SdrRectObj(
+        rMasterPage.getSdrModelFromSdrPage(), tools::Rectangle(Point(0, 0), Size(4000, 2000)));
+    rMasterPage.NbcInsertObject(pRect.get());
+    pRect->BroadcastObjectChange();
+
+    auto aDelta = getVectorPrimitives(u"testMasterDelta", nVersion);
+    assertJsonPath(aDelta, "/type", "vectorprimitivesdelta");
+    // The slide object itself is unchanged, so no object content, but
+    // the changed master page comes along.
+    CPPUNIT_ASSERT_EQUAL(size_t(0), aDelta.getSize("/objects").value_or(SIZE_MAX));
+    assertJsonPathExists(aDelta, "/masterPage");
+}
+
+CPPUNIT_TEST_FIXTURE(VectorRenderingTest, testPullSetsPushBaseline)
+{
+    // A full pull records the requesting view's content version as that
+    // view's push baseline. The first push to the view then carries only
+    // later changes, not the whole slide the view already pulled.
+
+    createBlankDoc();
+    addRectangle(tools::Rectangle(Point(1000, 1000), Size(3000, 2000)), Color(0x4472c4), COL_BLACK);
+    addRectangle(tools::Rectangle(Point(6000, 1000), Size(3000, 2000)), Color(0xc00000), COL_BLACK);
+    page(1)->GetObj(0)->BroadcastObjectChange();
+    page(1)->GetObj(1)->BroadcastObjectChange();
+
+    // The full pull gives the view both objects and sets its baseline.
+    auto aFull = getVectorPrimitives(u"testPullBaseline");
+    CPPUNIT_ASSERT_EQUAL(size_t(2), aFull.getSize("/objects").value_or(0));
+
+    const SfxViewShell* pView = SfxViewShell::Current();
+    CPPUNIT_ASSERT(pView);
+    const sal_Int32 nViewId = static_cast<sal_Int32>(pView->GetViewShellId().get());
+
+    SdXImpressDocument* pDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
+    CPPUNIT_ASSERT(pDocument);
+    const OString aCommand
+        = ".uno:VectorPrimitives?part=0&pushdelta=1&viewid=" + OString::number(nViewId);
+    tools::JsonWriter aJsonWriter;
+    pDocument->getCommandValues(aJsonWriter,
+                                std::string_view(aCommand.getStr(), aCommand.getLength()));
+    const OString aResult = aJsonWriter.finishAndGetAsOString();
+    auto oDelta = tools::JsonPath::parse(std::string_view(aResult.getStr(), aResult.getLength()));
+    CPPUNIT_ASSERT(oDelta.has_value());
+
+    assertJsonPath(*oDelta, "/type", "vectorprimitivesdelta");
+    // The order still lists both objects, but nothing changed since the
+    // pull, so the push carries no object content.
+    CPPUNIT_ASSERT_EQUAL(size_t(2), oDelta->getSize("/order").value_or(0));
+    CPPUNIT_ASSERT_EQUAL(size_t(0), oDelta->getSize("/objects").value_or(SIZE_MAX));
+}
+
+CPPUNIT_TEST_FIXTURE(VectorRenderingTest, testEditedTextAppearsInPrimitives)
+{
+    // While a text object is being edited, its in-progress text must appear in
+    // the vector primitives. Vector rendering has no edit-view overlay to draw
+    // it, unlike tile rendering.
+    createBlankDoc();
+    addRectangle(tools::Rectangle(Point(1000, 1000), Size(6000, 3000)), Color(0x4472c4), COL_BLACK);
+
+    // Enter text edit on the object and type a word.
+    SdrView* pView = getSdDocShell()->GetViewShell()->GetView();
+    CPPUNIT_ASSERT(pView);
+    pView->SdrBeginTextEdit(page(1)->GetObj(0));
+    EditView& rEditView = pView->GetTextEditOutlinerView()->GetEditView();
+    rEditView.InsertText(u"Hello"_ustr);
+
+    // Serialize while the edit is still active.
+    SdXImpressDocument* pDoc = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
+    CPPUNIT_ASSERT(pDoc);
+    tools::JsonWriter aJsonWriter;
+    pDoc->getCommandValues(aJsonWriter, ".uno:VectorPrimitives?part=0");
+    const OString aResult = aJsonWriter.finishAndGetAsOString();
+
+    pView->SdrEndTextEdit();
+
+    CPPUNIT_ASSERT_MESSAGE(aResult.getStr(), aResult.indexOf("Hello") >= 0);
+}
+
+CPPUNIT_TEST_FIXTURE(VectorRenderingTest, testDeltaIncludesEditedObject)
+{
+    // Typing does not advance the part version, so a delta requested while a
+    // text object is being edited must still carry that object. Otherwise the
+    // view would not change until the edit is committed.
+    createBlankDoc();
+    addRectangle(tools::Rectangle(Point(1000, 1000), Size(6000, 3000)), Color(0x4472c4), COL_BLACK);
+    SdrObject* pObject = page(1)->GetObj(0);
+
+    SdrView* pView = getSdDocShell()->GetViewShell()->GetView();
+    CPPUNIT_ASSERT(pView);
+    pView->SdrBeginTextEdit(pObject);
+    pView->GetTextEditOutlinerView()->GetEditView().InsertText(u"Hello"_ustr);
+
+    // Read the current version, then ask for a delta since exactly that.
+    // No object has changed past it, so only the object being edited can
+    // make the delta non-empty.
+    const sal_Int64 nVersion
+        = getVectorPrimitives(u"testEditDeltaBase").getInt("/version").value_or(-1);
+    auto aDelta = getVectorPrimitives(u"testEditDelta", nVersion);
+
+    pView->SdrEndTextEdit();
+
+    assertJsonPath(aDelta, "/type", "vectorprimitivesdelta");
+    CPPUNIT_ASSERT_EQUAL(size_t(1), aDelta.getSize("/objects").value_or(0));
+    CPPUNIT_ASSERT_EQUAL(static_cast<sal_Int64>(pObject->GetUniqueID()),
+                         aDelta.getInt("/objects/0/id").value_or(-1));
 }
 
 CPPUNIT_TEST_FIXTURE(VectorRenderingTest, testStrokedRectangle)

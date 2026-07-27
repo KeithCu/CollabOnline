@@ -187,14 +187,24 @@ public:
                              vcl::KitWindowId nWindowId,
                              std::u16string_view rAction,
                              const std::vector<vcl::KitPayloadItem>& rPayload = std::vector<vcl::KitPayloadItem>());
-    /// Emits a KIT_CALLBACK_DOCUMENT_SIZE_CHANGED - if @bInvalidateAll - first invalidates all parts
-    static void notifyDocumentSizeChanged(SfxViewShell const* pThisView, const OString& rPayload, vcl::ITiledRenderable* pDoc, bool bInvalidateAll = true);
-    /// Emits a KIT_CALLBACK_DOCUMENT_SIZE_CHANGED for all views of the same document - if @bInvalidateAll - first invalidates all parts
-    static void notifyDocumentSizeChangedAllViews(vcl::ITiledRenderable* pDoc, bool bInvalidateAll = true);
+    /// Emits a KIT_CALLBACK_DOCUMENT_SIZE_CHANGED - if @bInvalidateAllParts - first invalidates all parts
+    static void notifyDocumentSizeChanged(SfxViewShell const* pThisView, const OString& rPayload, vcl::ITiledRenderable* pDoc, bool bInvalidateAllParts = true);
+    /// Emits a KIT_CALLBACK_DOCUMENT_SIZE_CHANGED for all views of the same document - if @bInvalidateAllParts - first invalidates all parts
+    static void notifyDocumentSizeChangedAllViews(vcl::ITiledRenderable* pDoc, bool bInvalidateAllParts = true);
     /// Emits a KIT_CALLBACK_STATE_CHANGED for all views of the same document - with payload ".uno:CurrentPageResize"
     static void notifyCurrentPageSizeChangedAllViews(const vcl::ITiledRenderable* pDoc);
     /// Emits a KIT_CALLBACK_DOCUMENT_SIZE_CHANGED for all views of the same document with the same part
     static void notifyPartSizeChangedAllViews(vcl::ITiledRenderable* pDoc, int nPart);
+    /// Emits a KIT_CALLBACK_INVALIDATE_TILES for the given part on the views of
+    /// the document. A null rectangle invalidates the whole part. When
+    /// bSkipViewShowingPart is true the views currently showing that part are
+    /// left out, because a view invalidates the part it displays through the
+    /// normal paint path; pass false when the caller did not paint that part on
+    /// the view showing it (for example an undo that repaints only the base
+    /// sheet), so the view showing the part still gets invalidated.
+    static void notifyInvalidationAllViews(vcl::ITiledRenderable* pDoc, int nPart,
+                                           tools::Rectangle const* pRect,
+                                           bool bSkipViewShowingPart = true);
     /// Emits a KIT_CALLBACK_INVALIDATE_VISIBLE_CURSOR
     static void notifyCursorInvalidation(SfxViewShell const* pThisView, tools::Rectangle const * pRect, bool bControlEvent, int windowID);
     /// Emits a KIT_CALLBACK_INVALIDATE_TILES, but tweaks it according to setOptionalFeatures() if needed.

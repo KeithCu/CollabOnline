@@ -20,16 +20,16 @@
 #pragma once
 
 #include <action.hxx>
-#include <cppcanvas/canvas.hxx>
+#include <canvas.hxx>
 
 namespace basegfx {
     class B2DPoint;
 }
 
 
-/* Definition of internal::LineActionFactory */
+/* Definition of LineActionFactory */
 
-namespace cppcanvas::internal
+namespace cppcanvas
     {
         struct OutDevState;
 

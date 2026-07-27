@@ -68,8 +68,8 @@ inline bool td_equals( typelib_TypeDescription * pTD, typelib_TypeDescriptionRef
              rtl_ustr_compare( pTD->pTypeName->buffer, pType->pTypeName->buffer ) == 0));
 }
 
-typedef std::unordered_map< OUString, css::uno::WeakReference< css::reflection::XIdlField > > OUString2Field;
-typedef std::unordered_map< OUString, css::uno::WeakReference< css::reflection::XIdlMethod > > OUString2Method;
+typedef std::unordered_map< OUString, cpo::uno::WeakReference< css::reflection::XIdlField > > OUString2Field;
+typedef std::unordered_map< OUString, cpo::uno::WeakReference< css::reflection::XIdlMethod > > OUString2Method;
 
 
 class IdlReflectionServiceImpl
@@ -131,7 +131,7 @@ class IdlClassImpl
                                  m_xReflection;
 
     OUString                    _aName;
-    css::uno::TypeClass         _eTypeClass;
+    cpo::uno::TypeClass         _eTypeClass;
 
     typelib_TypeDescription *   _pTypeDescr;
 
@@ -148,7 +148,7 @@ public:
     virtual ~IdlClassImpl() override;
 
     // XIdlClassImpl default implementation
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override;
+    virtual cpo::uno::TypeClass SAL_CALL getTypeClass() override;
     virtual OUString SAL_CALL getName() override;
     virtual bool SAL_CALL equals( const css::uno::Reference< css::reflection::XIdlClass >& xType ) override;
 
@@ -339,14 +339,14 @@ inline bool extract(
     {
         if (! rObj.hasValue())
             return true;
-        if (rObj.getValueTypeClass() == css::uno::TypeClass_INTERFACE)
+        if (rObj.getValueTypeClass() == cpo::uno::TypeClass_INTERFACE)
         {
             return ::uno_type_assignData(
                 &rDest, pTo->aBase.pWeakRef,
                 const_cast< void * >( rObj.getValue() ), rObj.getValueTypeRef(),
-                reinterpret_cast< uno_QueryInterfaceFunc >(css::uno::cpp_queryInterface),
-                reinterpret_cast< uno_AcquireFunc >(css::uno::cpp_acquire),
-                reinterpret_cast< uno_ReleaseFunc >(css::uno::cpp_release) );
+                reinterpret_cast< uno_QueryInterfaceFunc >(cpo::uno::cpp_queryInterface),
+                reinterpret_cast< uno_AcquireFunc >(cpo::uno::cpp_acquire),
+                reinterpret_cast< uno_ReleaseFunc >(cpo::uno::cpp_release) );
         }
         else if (auto t = o3tl::tryAccess<cpo::uno::Type>(rObj))
         {
@@ -380,18 +380,18 @@ inline bool coerce_assign(
         return uno_assignData(
             pDest, pTD,
             const_cast<cpo::uno::Any *>(&rSource), pTD,
-            reinterpret_cast< uno_QueryInterfaceFunc >(css::uno::cpp_queryInterface),
-            reinterpret_cast< uno_AcquireFunc >(css::uno::cpp_acquire),
-            reinterpret_cast< uno_ReleaseFunc >(css::uno::cpp_release) );
+            reinterpret_cast< uno_QueryInterfaceFunc >(cpo::uno::cpp_queryInterface),
+            reinterpret_cast< uno_AcquireFunc >(cpo::uno::cpp_acquire),
+            reinterpret_cast< uno_ReleaseFunc >(cpo::uno::cpp_release) );
     }
     else
     {
         return uno_type_assignData(
             pDest, pTD->pWeakRef,
             const_cast<void *>(rSource.getValue()), rSource.getValueTypeRef(),
-            reinterpret_cast< uno_QueryInterfaceFunc >(css::uno::cpp_queryInterface),
-            reinterpret_cast< uno_AcquireFunc >(css::uno::cpp_acquire),
-            reinterpret_cast< uno_ReleaseFunc >(css::uno::cpp_release) );
+            reinterpret_cast< uno_QueryInterfaceFunc >(cpo::uno::cpp_queryInterface),
+            reinterpret_cast< uno_AcquireFunc >(cpo::uno::cpp_acquire),
+            reinterpret_cast< uno_ReleaseFunc >(cpo::uno::cpp_release) );
     }
 }
 

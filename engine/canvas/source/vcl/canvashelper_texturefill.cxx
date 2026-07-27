@@ -45,8 +45,8 @@
 #include <canvas/canvastools.hxx>
 #include <parametricpolypolygon.hxx>
 
-#include "canvashelper.hxx"
-#include "impltools.hxx"
+#include <canvashelper.hxx>
+#include <impltools.hxx>
 
 
 using namespace ::com::sun::star;
@@ -614,7 +614,7 @@ namespace vclcanvas
 
             const int nTransparency( setupOutDevState( viewState, renderState, IGNORE_COLOR ) );
             ::tools::PolyPolygon aPolyPoly( vclcanvastools::mapPolyPolygon(
-                                       ::basegfx::unotools::b2DPolyPolygonFromXPolyPolygon2D(xPolyPolygon),
+                                       ::canvastools::b2DPolyPolygonFromXPolyPolygon2D(xPolyPolygon),
                                        viewState, renderState ) );
 
             // TODO(F1): Multi-texturing

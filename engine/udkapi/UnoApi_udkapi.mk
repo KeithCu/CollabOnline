@@ -112,9 +112,6 @@ $(eval $(call gb_UnoApi_add_idlfiles_nohdl,udkapi,com/sun/star/script,\
 	Invocation \
 	InvocationAdapterFactory \
 ))
-$(eval $(call gb_UnoApi_add_idlfiles_nohdl,udkapi,com/sun/star/uno,\
-	NamingService \
-))
 $(eval $(call gb_UnoApi_add_idlfiles_nohdl,udkapi,com/sun/star/uri,\
 	ExternalUriReferenceTranslator \
 	UriReferenceFactory \
@@ -125,6 +122,9 @@ $(eval $(call gb_UnoApi_add_idlfiles_nohdl,udkapi,com/sun/star/uri,\
 $(eval $(call gb_UnoApi_add_idlfiles_nohdl,udkapi,com/sun/star/util,\
 	MacroExpander \
 	theMacroExpander \
+))
+$(eval $(call gb_UnoApi_add_idlfiles_nohdl,udkapi,cpo/uno,\
+	NamingService \
 ))
 
 
@@ -461,20 +461,22 @@ $(eval $(call gb_UnoApi_add_idlfiles,udkapi,com/sun/star/task,\
 	XInteractionRequest \
 	XInteractionRetry \
 ))
+$(eval $(call gb_UnoApi_add_idlfiles,udkapi,cpo/uno,\
+	TypeClass \
+	XAdapter \
+	XNamingService \
+	XUnloadingPreference \
+))
 $(eval $(call gb_UnoApi_add_idlfiles,udkapi,com/sun/star/uno,\
 	DeploymentException \
 	Exception \
 	RuntimeException \
 	SecurityException \
-	TypeClass \
-	XAdapter \
 	XAggregation \
 	XComponentContext \
 	XCurrentContext \
 	XInterface \
-	XNamingService \
 	XReference \
-	XUnloadingPreference \
 	XWeak \
 ))
 $(eval $(call gb_UnoApi_add_idlfiles,udkapi,com/sun/star/uri,\

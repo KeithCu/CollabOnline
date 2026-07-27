@@ -22,35 +22,33 @@
 #include <cppuhelper/compbase.hxx>
 
 #include <com/sun/star/lang/XServiceInfo.hpp>
-#include <com/sun/star/rendering/XBitmapCanvas.hpp>
-#include <com/sun/star/rendering/XIntegerBitmap.hpp>
+#include <com/sun/star/rendering/XCanvas.hpp>
+#include <com/sun/star/rendering/XBitmap.hpp>
 #include <com/sun/star/beans/XFastPropertySet.hpp>
 
 #include <vcl/bitmap.hxx>
 
 #include <base/bitmapcanvasbase.hxx>
 #include <base/basemutexhelper.hxx>
-#include <base/integerbitmapbase.hxx>
 #include "canvasbitmaphelper.hxx"
 
-#include "impltools.hxx"
-#include "repainttarget.hxx"
+#include <impltools.hxx>
+#include <repainttarget.hxx>
 
 
 /* Definition of CanvasBitmap class */
 
 namespace vclcanvas
 {
-    typedef ::cppu::WeakComponentImplHelper< css::rendering::XBitmapCanvas,
-                                             css::rendering::XIntegerBitmap,
+    typedef ::cppu::WeakComponentImplHelper< css::rendering::XCanvas,
+                                             css::rendering::XBitmap,
                                              css::lang::XServiceInfo,
                                              css::beans::XFastPropertySet >    CanvasBitmapBase_Base;
-    typedef ::canvas::IntegerBitmapBase<
-        canvas::BitmapCanvasBase2<
+    typedef canvas::BitmapCanvasBase<
             ::canvas::BaseMutexHelper< CanvasBitmapBase_Base >,
             CanvasBitmapHelper,
             vclcanvastools::LocalGuard,
-            ::cppu::OWeakObject> > CanvasBitmap_Base;
+            ::cppu::OWeakObject> CanvasBitmap_Base;
 
     class CanvasBitmap : public CanvasBitmap_Base,
                          public RepaintTarget
@@ -78,9 +76,9 @@ namespace vclcanvas
                       const OutDevProviderSharedPtr&               rOutDevProvider );
 
         // XServiceInfo
-        virtual OUString SAL_CALL getImplementationName(  ) override;
-        virtual bool SAL_CALL supportsService( const OUString& ServiceName ) override;
-        virtual cpo::uno::Sequence< OUString > SAL_CALL getSupportedServiceNames(  ) override;
+        virtual OUString getImplementationName(  ) override;
+        virtual bool supportsService( const OUString& ServiceName ) override;
+        virtual cpo::uno::Sequence< OUString > getSupportedServiceNames(  ) override;
 
         // RepaintTarget interface
         virtual bool repaint( const GraphicObjectSharedPtr&                   rGrf,
@@ -103,8 +101,8 @@ namespace vclcanvas
         //     1st a bool value: true - free the pixmap after used by XFreePixmap, false do nothing, the pixmap is used internally in the canvas
         //     2nd the pixmap handle (sal_Int64)
         //     3rd the pixmap depth
-        virtual cpo::uno::Any SAL_CALL getFastPropertyValue(sal_Int32 nHandle) override;
-        virtual void SAL_CALL setFastPropertyValue(sal_Int32, const cpo::uno::Any&) override {}
+        virtual cpo::uno::Any getFastPropertyValue(sal_Int32 nHandle) override;
+        virtual void setFastPropertyValue(sal_Int32, const cpo::uno::Any&) override {}
 
     private:
         /** MUST hold here, too, since CanvasHelper only contains a

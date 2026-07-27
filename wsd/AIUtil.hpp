@@ -20,9 +20,28 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace AIUtil
 {
+
+/// Base URL for a built-in AI provider id (openai, groq, together, mistral),
+/// or an empty view when the id is not one of them. Keep the list in sync with
+/// AI_PROVIDERS in browser/admin/src/integrator/AdminIntegratorSettings.ts.
+std::string_view preCannedAIProviderBaseUrl(std::string_view id);
+
+/// True when the host belongs to one of the built-in AI providers above. These
+/// are fixed public endpoints, so outbound AI requests to them are trusted
+/// without needing an entry in the net.lok_allow host allowlist; a custom
+/// provider's host still goes through that allowlist.
+bool isPreCannedAIProviderHost(std::string_view host);
+
+/// Return the base URL reduced to its bare origin: any trailing slashes and a
+/// single trailing "/v1" segment removed (the "/v1" match is case-insensitive).
+/// An empty input returns empty. This is the canonical form to which a version
+/// path such as "/v1/chat/completions" is appended, so a stored value that
+/// already ends in "/v1" does not produce a doubled "/v1/v1/..." path.
+std::string normalizeAIBaseUrl(std::string_view baseUrl);
 
 /// Parse a tool's argument JSON. Most models emit a single object ({...}), but
 /// some emit a JSON array of objects ([{...},{...}]); when that happens, merge

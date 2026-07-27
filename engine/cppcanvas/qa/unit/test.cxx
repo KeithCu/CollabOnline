@@ -15,11 +15,11 @@
 #include <vcl/gdimtf.hxx>
 #include <vcl/metaact.hxx>
 
+#include <com/sun/star/rendering/CanvasFactory.hpp>
 #include <com/sun/star/rendering/XBitmap.hpp>
 #include <com/sun/star/rendering/XCanvas.hpp>
-#include <com/sun/star/rendering/XBitmapCanvas.hpp>
 
-#include <cppcanvas/vclfactory.hxx>
+#include <vclfactory.hxx>
 
 using namespace ::com::sun::star;
 
@@ -70,7 +70,9 @@ CPPUNIT_TEST_FIXTURE(CanvasTest, testComposite)
 {
     ScopedVclPtrInstance<WorkWindow> pWin(nullptr, WB_STDWORK);
 
-    uno::Reference<rendering::XCanvas> xCanvas = pWin->GetOutDev()->GetCanvas();
+    uno::Reference<rendering::XCanvas> xCanvas
+        = css::rendering::CanvasFactory::create(m_xContext)
+              ->create(reinterpret_cast<sal_Int64>(pWin->GetOutDev()));
     CPPUNIT_ASSERT(xCanvas.is());
 
     // a huge canvas ...
@@ -79,16 +81,8 @@ CPPUNIT_TEST_FIXTURE(CanvasTest, testComposite)
         vcl::unotools::integerSize2DFromSize(aSize));
     CPPUNIT_ASSERT(xBitmap.is());
 
-    uno::Reference<rendering::XBitmapCanvas> xBitmapCanvas(xBitmap, uno::UNO_QUERY);
+    uno::Reference<rendering::XCanvas> xBitmapCanvas(xBitmap, uno::UNO_QUERY);
     CPPUNIT_ASSERT(xBitmapCanvas.is());
-
-    Bitmap aBitmap;
-    {
-        // clear the canvas and basic sanity check ...
-        xBitmapCanvas->clear();
-        CPPUNIT_ASSERT(aBitmap.Create(xBitmapCanvas, aSize));
-        CPPUNIT_ASSERT(aBitmap.HasAlpha());
-    }
 
     {
         // render something
@@ -141,11 +135,13 @@ CPPUNIT_TEST_FIXTURE(CanvasTest, testTdf155810)
 
         aOutputMetaFile.Record(pDev.get());
 
-        auto xCanvas = pDev->GetCanvas();
+        uno::Reference<rendering::XCanvas> xCanvas
+            = css::rendering::CanvasFactory::create(m_xContext)
+                  ->create(reinterpret_cast<sal_Int64>(pDev.get()));
         CPPUNIT_ASSERT(xCanvas.is());
         auto pCanvas = cppcanvas::VCLFactory::createCanvas(xCanvas);
 
-        auto pRenderer = cppcanvas::VCLFactory::createRenderer(pCanvas, aInputMetaFile, {});
+        auto pRenderer = cppcanvas::VCLFactory::createRenderer(pCanvas, aInputMetaFile);
         pRenderer->draw();
 
         aOutputMetaFile.Stop();

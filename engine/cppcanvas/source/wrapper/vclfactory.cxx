@@ -17,15 +17,16 @@
  *   the License at http://www.apache.org/licenses/LICENSE-2.0 .
  */
 
+#include <com/sun/star/rendering/XCanvas.hpp>
 #include <osl/diagnose.h>
 #include <vcl/window.hxx>
 #include <vcl/canvastools.hxx>
 
-#include <cppcanvas/vclfactory.hxx>
+#include <vclfactory.hxx>
 
-#include "implbitmapcanvas.hxx"
-#include "implbitmap.hxx"
-#include <implrenderer.hxx>
+#include <canvas.hxx>
+#include <renderer.hxx>
+#include <cppcanvas/test.hxx>
 
 using namespace ::com::sun::star;
 
@@ -33,38 +34,29 @@ namespace cppcanvas
 {
     CanvasSharedPtr VCLFactory::createCanvas( const uno::Reference< rendering::XCanvas >& xCanvas )
     {
-        return std::make_shared<internal::ImplCanvas>( xCanvas );
-    }
-
-    BitmapCanvasSharedPtr VCLFactory::createBitmapCanvas( const uno::Reference< rendering::XBitmapCanvas >& xCanvas )
-    {
-        return std::make_shared<internal::ImplBitmapCanvas>( xCanvas );
-    }
-
-    BitmapSharedPtr VCLFactory::createBitmap( const CanvasSharedPtr&    rCanvas,
-                                              const ::Bitmap&         rBmp )
-    {
-        OSL_ENSURE( rCanvas && rCanvas->getUNOCanvas().is(),
-                    "VCLFactory::createBitmap(): Invalid canvas" );
-
-        if( !rCanvas )
-            return BitmapSharedPtr();
-
-        uno::Reference< rendering::XCanvas > xCanvas( rCanvas->getUNOCanvas() );
-        if( !xCanvas.is() )
-            return BitmapSharedPtr();
-
-        return std::make_shared<internal::ImplBitmap>( rCanvas,
-                                                          vcl::unotools::xBitmapFromBitmap(rBmp) );
+        return std::make_shared<Canvas>( xCanvas );
     }
 
     RendererSharedPtr VCLFactory::createRenderer( const CanvasSharedPtr&        rCanvas,
-                                                  const ::GDIMetaFile&          rMtf,
-                                                  const Renderer::Parameters&   rParms )
+                                                  const ::GDIMetaFile&          rMtf )
     {
-        return std::make_shared<internal::ImplRenderer>( rCanvas,
-                                                              rMtf,
-                                                              rParms );
+        return std::make_shared<Renderer>( rCanvas, rMtf );
+    }
+
+    // only here so we can do a unit test from drawinglayer/qa/unit/vclmetafileprocessor2d.cxx
+    bool testCanvasDraw(const css::uno::Reference<css::rendering::XCanvas>& rCanvas,
+            const basegfx::B2DHomMatrix& rTransform1,
+            GDIMetaFile& rMetaFile,
+            const basegfx::B2DHomMatrix& rTransform2)
+    {
+        cppcanvas::CanvasSharedPtr cppCanvas = cppcanvas::VCLFactory::createCanvas(rCanvas);
+        // I got these matrices from a breakpoint in drawing the polyline, and walking up
+        // the stack to the canvas code.
+        cppCanvas->setTransformation(rTransform1);
+        cppcanvas::RendererSharedPtr renderer
+            = cppcanvas::VCLFactory::createRenderer(cppCanvas, rMetaFile);
+        renderer->setTransformation(rTransform2);
+        return renderer->draw();
     }
 }
 

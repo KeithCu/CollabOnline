@@ -97,6 +97,10 @@ interface AIProvider {
 interface SaveAllResult {
 	aiJustConfigured: boolean;
 	aiKeyMissing: boolean;
+	// The view settings as the user entered them, captured before the upload
+	// re-fetch redacts the in-memory copy. Applied to the live session so a
+	// freshly entered secret is not lost.
+	viewSettings: ViewSettings;
 }
 
 // Visual state of an AI model-fetch status line. 'hidden' (or an empty message)
@@ -189,7 +193,10 @@ const onMessage = (e) => {
 						window.parent.postMessage(
 							JSON.stringify({
 								MessageId: 'settings-save-complete',
-								viewSettings: settingIframe.getViewSettings(),
+								// Use the settings as entered (from saveAll), not the
+								// re-fetched copy, so a freshly typed key still reaches
+								// the live session.
+								viewSettings: result.viewSettings,
 								aiJustConfigured: result.aiJustConfigured,
 								aiKeyMissing: result.aiKeyMissing,
 							}),
@@ -358,7 +365,13 @@ class OnlineSettingsStorage extends SettingsStorage {
 				'something went wrong shared config response',
 				await response.text(),
 			);
-			throw new Error(`Could not fetch shared config: ${response.statusText}`);
+			const error = new Error(
+				`Could not fetch shared config: ${response.statusText}`,
+			);
+			// Carry the status so the caller can tell "not a signed-in user"
+			// (a client error from the host) from a genuine server failure.
+			(error as any).status = response.status;
+			throw error;
 		}
 
 		return await response.json();
@@ -713,6 +726,15 @@ class SettingIframe {
 	}
 
 	public async saveAll(): Promise<SaveAllResult> {
+		// Store the AI base URLs in their canonical form (no trailing "/v1"), in
+		// case a field was edited but never blurred before the save.
+		this._viewSetting.aiProviderURL = this.normalizeBaseUrl(
+			this._viewSetting.aiProviderURL || '',
+		);
+		this._viewSetting.aiImageProviderURL = this.normalizeBaseUrl(
+			this._viewSetting.aiImageProviderURL || '',
+		);
+
 		// The View-tab / AI-sidebar payoff should fire only when the user
 		// actually changed the chat AI configuration in this dialog session (not
 		// on every save that happens to already be configured). The key is
@@ -724,6 +746,12 @@ class SettingIframe {
 			!!this._viewSetting.aiProviderModel &&
 			!!this._viewSetting.aiProviderURL;
 		const aiKeyMissing = !this._viewSetting.aiProviderAPIKey;
+
+		// Snapshot the view settings as entered now. Uploading a file re-fetches
+		// the config, which redacts the in-memory copy, so reading it back after
+		// the uploads would drop a freshly typed key. The live session is
+		// updated from this snapshot.
+		const viewSettings: ViewSettings = { ...this._viewSetting };
 
 		const saves: Promise<void>[] = [];
 
@@ -760,7 +788,7 @@ class SettingIframe {
 
 		await Promise.all(saves);
 
-		return { aiJustConfigured, aiKeyMissing };
+		return { aiJustConfigured, aiKeyMissing, viewSettings };
 	}
 
 	init(): void {
@@ -1013,9 +1041,31 @@ class SettingIframe {
 			await this.populateSharedConfigUI(data);
 			console.debug('Shared config data: ', data);
 		} catch (error: unknown) {
-			SettingIframe.showErrorModal(
-				_('Something went wrong. Please try to refresh the page.'),
-			);
+			// A guest / anonymous session has no per-user settings: the host
+			// rejects the config request with a client error (for example a 400
+			// when there is no user context), or the settings URL and token were
+			// never provided. Say plainly that settings need a signed-in user,
+			// and keep the generic message for server or network failures.
+			const status = (error as any)?.status;
+			const noSettingsStore = !window.wopiSettingBaseUrl || !window.accessToken;
+			const notAuthorized = status === 400 || status === 401 || status === 403;
+			const isGuest = !isCODesktop && (noSettingsStore || notAuthorized);
+			if (isGuest) {
+				// The dialog has nothing to offer a guest, so close it when they
+				// dismiss the message rather than leaving an empty dialog open.
+				SettingIframe.showErrorModal(
+					_('Settings are only available to signed-in users.'),
+					() =>
+						window.parent.postMessage(
+							JSON.stringify({ MessageId: 'settings-cancel' }),
+							parentTargetOrigin(),
+						),
+				);
+			} else {
+				SettingIframe.showErrorModal(
+					_('Something went wrong. Please try to refresh the page.'),
+				);
+			}
 			console.error('Error fetching shared config:', error);
 		}
 
@@ -2377,7 +2427,7 @@ class SettingIframe {
 			'#aiProviderURL',
 		) as HTMLInputElement | null;
 		if (customUrlInput) {
-			customUrlInput.placeholder = _('e.g.') + ' http://localhost:11434/v1';
+			customUrlInput.placeholder = _('e.g.') + ' http://localhost:11434';
 		}
 
 		group.appendChild(
@@ -2503,7 +2553,7 @@ class SettingIframe {
 			'#aiImageProviderURL',
 		) as HTMLInputElement | null;
 		if (imageUrlInput) {
-			imageUrlInput.placeholder = _('e.g.') + ' http://localhost:11434/v1';
+			imageUrlInput.placeholder = _('e.g.') + ' http://localhost:11434';
 		}
 
 		group.appendChild(
@@ -2657,6 +2707,17 @@ class SettingIframe {
 			}
 		});
 
+		// On blur, rewrite the field to the canonical base URL (no trailing
+		// "/v1"), so the admin sees the value that will actually be stored.
+		customUrlInput?.addEventListener('change', () => {
+			if (this.isCustomProviderSelected(root, data)) {
+				const normalized = this.normalizeBaseUrl(customUrlInput.value);
+				customUrlInput.value = normalized;
+				data.aiProviderURL = normalized;
+				this._lastCustomAIProviderURL = normalized;
+			}
+		});
+
 		modelSelect?.addEventListener('change', () => {
 			this._aiConfigDirty = true;
 			data.aiProviderModel = modelSelect.value;
@@ -2724,6 +2785,20 @@ class SettingIframe {
 				data.aiImageProviderURL = customUrlInput.value;
 				this._lastCustomAIImageProviderURL = customUrlInput.value;
 				queueFetch();
+			}
+		});
+
+		// On blur, rewrite the field to the canonical base URL (no trailing
+		// "/v1"), so the admin sees the value that will actually be stored.
+		customUrlInput?.addEventListener('change', () => {
+			const imageProvider = root.querySelector(
+				'#aiImageProvider',
+			) as HTMLSelectElement | null;
+			if (imageProvider?.value === 'custom') {
+				const normalized = this.normalizeBaseUrl(customUrlInput.value);
+				customUrlInput.value = normalized;
+				data.aiImageProviderURL = normalized;
+				this._lastCustomAIImageProviderURL = normalized;
 			}
 		});
 
@@ -3064,6 +3139,12 @@ class SettingIframe {
 		if (body) {
 			console.warn(`fetch-models failed (HTTP ${status}): ${body}`);
 		}
+		// A 429 covers both a throttle and an exhausted quota. They need
+		// opposite advice, so tell them apart from the error body: waiting
+		// clears a throttle, but not a quota that is used up.
+		if (status === 429 && /insufficient_quota/.test(body)) {
+			return _('API quota exceeded - check your plan and billing details');
+		}
 		return (
 			AI_ERROR_MESSAGES[status] ||
 			_(
@@ -3260,6 +3341,11 @@ class SettingIframe {
 				this._viewSetting.aiProviderURL =
 					this.normalizeBaseUrl(viewSetting.aiProviderURL || '') ||
 					this.getDefaultAIProviderURL();
+				// An empty image URL means "Same as Text AI", so keep it empty
+				// rather than falling back to a default.
+				this._viewSetting.aiImageProviderURL = this.normalizeBaseUrl(
+					viewSetting.aiImageProviderURL || '',
+				);
 				this._aiConfigDirty = false;
 				this.generateAISettingsUI(viewSetting, settingsContainer);
 			}
@@ -3601,7 +3687,12 @@ class SettingIframe {
 	}
 
 	private normalizeBaseUrl(value: string): string {
-		return value ? value.replace(/\/+$/, '') : '';
+		if (!value) return '';
+		// The server appends "/v1/..." to this base URL, so reduce it to the bare
+		// origin. A value that already ends in "/v1" (users often paste one) would
+		// otherwise produce a doubled "/v1/v1/..." path. Trailing slashes go first,
+		// then a single trailing "/v1", then any slash left behind.
+		return value.replace(/\/+$/, '').replace(/\/v1$/i, '').replace(/\/+$/, '');
 	}
 
 	private getProviderById(id: string): AIProvider | undefined {
@@ -3655,7 +3746,7 @@ class SettingIframe {
 		return window.iframeType === 'admin';
 	}
 
-	static showErrorModal(message: string): void {
+	static showErrorModal(message: string, onClose?: () => void): void {
 		const modal = document.createElement('div');
 		modal.className = 'modal';
 
@@ -3679,6 +3770,7 @@ class SettingIframe {
 		okButton.classList.add('button', 'button--vue-secondary');
 		okButton.addEventListener('click', () => {
 			document.body.removeChild(modal);
+			onClose?.();
 		});
 
 		buttonContainer.appendChild(okButton);
@@ -3754,6 +3846,14 @@ document.addEventListener('DOMContentLoaded', () => {
 			attributes: true,
 			characterData: true,
 		});
+
+		// init() builds the settings DOM before the observer is attached, so a
+		// page that never mutates afterwards would otherwise never send its
+		// first height and the parent would keep the iframe at its CSS default
+		// height (short frame with an inner scrollbar). Post one height now,
+		// and again once fonts/images have settled the final layout.
+		postHeight();
+		window.addEventListener('load', postHeight);
 	}
 });
 

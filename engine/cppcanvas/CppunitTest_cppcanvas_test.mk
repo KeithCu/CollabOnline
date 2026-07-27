@@ -11,6 +11,11 @@
 
 $(eval $(call gb_CppunitTest_CppunitTest,cppcanvas_test))
 
+$(eval $(call gb_CppunitTest_set_include,cppcanvas_test,\
+	-I$(SRCDIR)/cppcanvas/source/inc \
+	$$(INCLUDE) \
+))
+
 $(eval $(call gb_CppunitTest_add_exception_objects,cppcanvas_test, \
     cppcanvas/qa/unit/test \
 ))
@@ -39,7 +44,6 @@ $(eval $(call gb_CppunitTest_use_ure,cppcanvas_test))
 $(eval $(call gb_CppunitTest_use_vcl,cppcanvas_test))
 
 $(eval $(call gb_CppunitTest_use_components,cppcanvas_test,\
-	canvas/source/vcl/vclcanvas \
 	canvas/source/factory/canvasfactory \
     configmgr/source/configmgr \
     i18npool/util/i18npool \

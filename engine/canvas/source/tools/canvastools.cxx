@@ -40,15 +40,10 @@
 #include <com/sun/star/geometry/Matrix2D.hpp>
 #include <com/sun/star/lang/XServiceInfo.hpp>
 #include <com/sun/star/rendering/ColorComponentTag.hpp>
-#include <com/sun/star/rendering/ColorSpaceType.hpp>
 #include <com/sun/star/rendering/CompositeOperation.hpp>
-#include <com/sun/star/rendering/IntegerBitmapLayout.hpp>
 #include <com/sun/star/rendering/RenderState.hpp>
-#include <com/sun/star/rendering/RenderingIntent.hpp>
 #include <com/sun/star/rendering/ViewState.hpp>
 #include <com/sun/star/rendering/XCanvas.hpp>
-#include <com/sun/star/rendering/XColorSpace.hpp>
-#include <com/sun/star/rendering/XIntegerBitmapColorSpace.hpp>
 #include <com/sun/star/util/Endianness.hpp>
 #include <cppuhelper/implbase.hxx>
 #include <sal/log.hxx>
@@ -58,19 +53,13 @@
 #include <vcl/window.hxx>
 
 #include <canvas/canvastools.hxx>
+#include <unopolypolygon.hxx>
 
 
 using namespace ::com::sun::star;
 
 namespace canvastools
 {
-        geometry::RealSize2D createInfiniteSize2D()
-        {
-            return geometry::RealSize2D(
-                std::numeric_limits<double>::infinity(),
-                std::numeric_limits<double>::infinity() );
-        }
-
         rendering::RenderState& initRenderState( rendering::RenderState& renderState )
         {
             // setup identity transform
@@ -86,7 +75,6 @@ namespace canvastools
         {
             // setup identity transform
             setIdentityAffineMatrix2D( viewState.AffineTransform );
-            viewState.Clip.clear();
 
             return viewState;
         }
@@ -170,641 +158,6 @@ namespace canvastools
             return matrix;
         }
 
-        namespace
-        {
-            class StandardColorSpace : public cppu::WeakImplHelper< css::rendering::XIntegerBitmapColorSpace >
-            {
-            private:
-                cpo::uno::Sequence< sal_Int8 >  maComponentTags;
-                cpo::uno::Sequence< sal_Int32 > maBitCounts;
-
-                virtual ::sal_Int8 SAL_CALL getType(  ) override
-                {
-                    return rendering::ColorSpaceType::RGB;
-                }
-                virtual cpo::uno::Sequence< ::sal_Int8 > SAL_CALL getComponentTags(  ) override
-                {
-                    return maComponentTags;
-                }
-                virtual ::sal_Int8 SAL_CALL getRenderingIntent(  ) override
-                {
-                    return rendering::RenderingIntent::PERCEPTUAL;
-                }
-                virtual cpo::uno::Sequence< beans::PropertyValue > SAL_CALL getProperties(  ) override
-                {
-                    return cpo::uno::Sequence< beans::PropertyValue >();
-                }
-                virtual cpo::uno::Sequence< double > SAL_CALL convertColorSpace( const cpo::uno::Sequence< double >& deviceColor,
-                                                                            const uno::Reference< rendering::XColorSpace >& targetColorSpace ) override
-                {
-                    // TODO(P3): if we know anything about target
-                    // colorspace, this can be greatly sped up
-                    cpo::uno::Sequence<rendering::ARGBColor> aIntermediate(
-                        convertToARGB(deviceColor));
-                    return targetColorSpace->convertFromARGB(aIntermediate);
-                }
-                virtual cpo::uno::Sequence< rendering::RGBColor > SAL_CALL convertToRGB( const cpo::uno::Sequence< double >& deviceColor ) override
-                {
-                    const sal_Int32 nLen(deviceColor.getLength());
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::RGBColor > aRes(nLen/4);
-                    rendering::RGBColor* pOut( aRes.getArray() );
-                    for (sal_Int32 i = 0; i < nLen; i += 4)
-                    {
-                        *pOut++ = rendering::RGBColor(deviceColor[i], deviceColor[i+1], deviceColor[i+2]);
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< rendering::ARGBColor > SAL_CALL convertToARGB( const cpo::uno::Sequence< double >& deviceColor ) override
-                {
-                    SAL_WARN_IF(!deviceColor.hasElements(), "canvas", "empty deviceColor argument");
-                    const sal_Int32 nLen(deviceColor.getLength());
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::ARGBColor > aRes(nLen/4);
-                    rendering::ARGBColor* pOut( aRes.getArray() );
-                    for (sal_Int32 i = 0; i < nLen; i += 4)
-                    {
-                        *pOut++ = rendering::ARGBColor(deviceColor[i+3], deviceColor[i], deviceColor[i+1], deviceColor[i+2]);
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< rendering::ARGBColor > SAL_CALL convertToPARGB( const cpo::uno::Sequence< double >& deviceColor ) override
-                {
-                    const sal_Int32 nLen(deviceColor.getLength());
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::ARGBColor > aRes(nLen/4);
-                    rendering::ARGBColor* pOut( aRes.getArray() );
-                    for (sal_Int32 i = 0; i < nLen; i += 4)
-                    {
-                        *pOut++ = rendering::ARGBColor(deviceColor[i+3],
-                                                       deviceColor[i+3] * deviceColor[i],
-                                                       deviceColor[i+3] * deviceColor[i+1],
-                                                       deviceColor[i+3] * deviceColor[i+2]);
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< double > SAL_CALL convertFromRGB( const cpo::uno::Sequence< rendering::RGBColor >& rgbColor ) override
-                {
-                    cpo::uno::Sequence<double> aRes(rgbColor.getLength() * 4);
-                    double* pColors=aRes.getArray();
-                    for (auto& color : rgbColor)
-                    {
-                        *pColors++ = color.Red;
-                        *pColors++ = color.Green;
-                        *pColors++ = color.Blue;
-                        *pColors++ = 1.0;
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< double > SAL_CALL convertFromARGB( const cpo::uno::Sequence< rendering::ARGBColor >& rgbColor ) override
-                {
-                    cpo::uno::Sequence<double> aRes(rgbColor.getLength() * 4);
-                    double* pColors=aRes.getArray();
-                    for (auto& color : rgbColor)
-                    {
-                        *pColors++ = color.Red;
-                        *pColors++ = color.Green;
-                        *pColors++ = color.Blue;
-                        *pColors++ = color.Alpha;
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< double > SAL_CALL convertFromPARGB( const cpo::uno::Sequence< rendering::ARGBColor >& rgbColor ) override
-                {
-                    cpo::uno::Sequence<double> aRes(rgbColor.getLength() * 4);
-                    double* pColors=aRes.getArray();
-                    for (auto& color : rgbColor)
-                    {
-                        *pColors++ = color.Red / color.Alpha;
-                        *pColors++ = color.Green / color.Alpha;
-                        *pColors++ = color.Blue / color.Alpha;
-                        *pColors++ = color.Alpha;
-                    }
-                    return aRes;
-                }
-
-                // XIntegerBitmapColorSpace
-                virtual ::sal_Int32 SAL_CALL getBitsPerPixel(  ) override
-                {
-                    return 32;
-                }
-                virtual cpo::uno::Sequence< ::sal_Int32 > SAL_CALL getComponentBitCounts(  ) override
-                {
-                    return maBitCounts;
-                }
-                virtual ::sal_Int8 SAL_CALL getEndianness(  ) override
-                {
-                    return util::Endianness::LITTLE;
-                }
-                virtual cpo::uno::Sequence<double> SAL_CALL convertFromIntegerColorSpace( const cpo::uno::Sequence< ::sal_Int8 >& deviceColor,
-                                                                                     const uno::Reference< rendering::XColorSpace >& targetColorSpace ) override
-                {
-                    if( dynamic_cast<StandardColorSpace*>(targetColorSpace.get()) )
-                    {
-                        const sal_Int32 nLen(deviceColor.getLength());
-                        ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                             "number of channels no multiple of 4",
-                                             static_cast<rendering::XColorSpace*>(this), 0);
-
-                        cpo::uno::Sequence<double> aRes(nLen);
-                        std::transform(deviceColor.begin(), deviceColor.end(), aRes.getArray(),
-                                       [](auto c) { return vcl::unotools::toDoubleColor(c); });
-                        return aRes;
-                    }
-                    else
-                    {
-                        // TODO(P3): if we know anything about target
-                        // colorspace, this can be greatly sped up
-                        cpo::uno::Sequence<rendering::ARGBColor> aIntermediate(
-                            convertIntegerToARGB(deviceColor));
-                        return targetColorSpace->convertFromARGB(aIntermediate);
-                    }
-                }
-                virtual cpo::uno::Sequence< ::sal_Int8 > SAL_CALL convertToIntegerColorSpace( const cpo::uno::Sequence< ::sal_Int8 >& deviceColor,
-                                                                                         const uno::Reference< rendering::XIntegerBitmapColorSpace >& targetColorSpace ) override
-                {
-                    if( dynamic_cast<StandardColorSpace*>(targetColorSpace.get()) )
-                    {
-                        // it's us, so simply pass-through the data
-                        return deviceColor;
-                    }
-                    else
-                    {
-                        // TODO(P3): if we know anything about target
-                        // colorspace, this can be greatly sped up
-                        cpo::uno::Sequence<rendering::ARGBColor> aIntermediate(
-                            convertIntegerToARGB(deviceColor));
-                        return targetColorSpace->convertIntegerFromARGB(aIntermediate);
-                    }
-                }
-                virtual cpo::uno::Sequence< rendering::RGBColor > SAL_CALL convertIntegerToRGB( const cpo::uno::Sequence< ::sal_Int8 >& deviceColor ) override
-                {
-                    const sal_Int32 nLen(deviceColor.getLength());
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::RGBColor > aRes(nLen/4);
-                    rendering::RGBColor* pOut( aRes.getArray() );
-                    for (sal_Int32 i = 0; i < nLen; i += 4)
-                    {
-                        *pOut++ = rendering::RGBColor(
-                            vcl::unotools::toDoubleColor(deviceColor[i]),
-                            vcl::unotools::toDoubleColor(deviceColor[i+1]),
-                            vcl::unotools::toDoubleColor(deviceColor[i+2]));
-                    }
-                    return aRes;
-                }
-
-                virtual cpo::uno::Sequence< rendering::ARGBColor > SAL_CALL convertIntegerToARGB( const cpo::uno::Sequence< ::sal_Int8 >& deviceColor ) override
-                {
-                    const sal_Int32 nLen(deviceColor.getLength());
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::ARGBColor > aRes(nLen/4);
-                    rendering::ARGBColor* pOut( aRes.getArray() );
-                    for (sal_Int32 i = 0; i < nLen; i += 4)
-                    {
-                        *pOut++ = rendering::ARGBColor(
-                            vcl::unotools::toDoubleColor(deviceColor[i+3]),
-                            vcl::unotools::toDoubleColor(deviceColor[i]),
-                            vcl::unotools::toDoubleColor(deviceColor[i+1]),
-                            vcl::unotools::toDoubleColor(deviceColor[i+2]));
-                    }
-                    return aRes;
-                }
-
-                virtual cpo::uno::Sequence< rendering::ARGBColor > SAL_CALL convertIntegerToPARGB( const cpo::uno::Sequence< ::sal_Int8 >& deviceColor ) override
-                {
-                    const sal_Int32 nLen(deviceColor.getLength());
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::ARGBColor > aRes(nLen/4);
-                    rendering::ARGBColor* pOut( aRes.getArray() );
-                    for (sal_Int32 i = 0; i < nLen; i += 4)
-                    {
-                        const sal_Int8 nAlpha(deviceColor[i+3]);
-                        *pOut++ = rendering::ARGBColor(
-                            vcl::unotools::toDoubleColor(nAlpha),
-                            vcl::unotools::toDoubleColor(nAlpha * deviceColor[i]),
-                            vcl::unotools::toDoubleColor(nAlpha * deviceColor[i+1]),
-                            vcl::unotools::toDoubleColor(nAlpha * deviceColor[i+2]));
-                    }
-                    return aRes;
-                }
-
-                virtual cpo::uno::Sequence< ::sal_Int8 > SAL_CALL convertIntegerFromRGB( const cpo::uno::Sequence< rendering::RGBColor >& rgbColor ) override
-                {
-                    cpo::uno::Sequence<sal_Int8> aRes(rgbColor.getLength() * 4);
-                    sal_Int8* pColors=aRes.getArray();
-                    for (auto& color : rgbColor)
-                    {
-                        *pColors++ = vcl::unotools::toByteColor(color.Red);
-                        *pColors++ = vcl::unotools::toByteColor(color.Green);
-                        *pColors++ = vcl::unotools::toByteColor(color.Blue);
-                        *pColors++ = 0;
-                    }
-                    return aRes;
-                }
-
-                virtual cpo::uno::Sequence< ::sal_Int8 > SAL_CALL convertIntegerFromARGB( const cpo::uno::Sequence< rendering::ARGBColor >& rgbColor ) override
-                {
-                    cpo::uno::Sequence<sal_Int8> aRes(rgbColor.getLength() * 4);
-                    sal_Int8* pColors=aRes.getArray();
-                    for (auto& color : rgbColor)
-                    {
-                        *pColors++ = vcl::unotools::toByteColor(color.Red);
-                        *pColors++ = vcl::unotools::toByteColor(color.Green);
-                        *pColors++ = vcl::unotools::toByteColor(color.Blue);
-                        *pColors++ = vcl::unotools::toByteColor(color.Alpha);
-                    }
-                    return aRes;
-                }
-
-                virtual cpo::uno::Sequence< ::sal_Int8 > SAL_CALL convertIntegerFromPARGB( const cpo::uno::Sequence< rendering::ARGBColor >& rgbColor ) override
-                {
-                    cpo::uno::Sequence<sal_Int8> aRes(rgbColor.getLength() * 4);
-                    sal_Int8* pColors=aRes.getArray();
-                    for (auto& color : rgbColor)
-                    {
-                        *pColors++ = vcl::unotools::toByteColor(color.Red / color.Alpha);
-                        *pColors++ = vcl::unotools::toByteColor(color.Green / color.Alpha);
-                        *pColors++ = vcl::unotools::toByteColor(color.Blue / color.Alpha);
-                        *pColors++ = vcl::unotools::toByteColor(color.Alpha);
-                    }
-                    return aRes;
-                }
-
-            public:
-                StandardColorSpace() :
-                    maComponentTags(4),
-                    maBitCounts(4)
-                {
-                    sal_Int8*  pTags = maComponentTags.getArray();
-                    sal_Int32* pBitCounts = maBitCounts.getArray();
-                    pTags[0] = rendering::ColorComponentTag::RGB_RED;
-                    pTags[1] = rendering::ColorComponentTag::RGB_GREEN;
-                    pTags[2] = rendering::ColorComponentTag::RGB_BLUE;
-                    pTags[3] = rendering::ColorComponentTag::ALPHA;
-
-                    pBitCounts[0] =
-                    pBitCounts[1] =
-                    pBitCounts[2] =
-                    pBitCounts[3] = 8;
-                }
-            };
-
-            class StandardNoAlphaColorSpace : public cppu::WeakImplHelper< css::rendering::XIntegerBitmapColorSpace >
-            {
-            private:
-                cpo::uno::Sequence< sal_Int8 >  maComponentTags;
-                cpo::uno::Sequence< sal_Int32 > maBitCounts;
-
-                virtual ::sal_Int8 SAL_CALL getType(  ) override
-                {
-                    return rendering::ColorSpaceType::RGB;
-                }
-                virtual cpo::uno::Sequence< ::sal_Int8 > SAL_CALL getComponentTags(  ) override
-                {
-                    return maComponentTags;
-                }
-                virtual ::sal_Int8 SAL_CALL getRenderingIntent(  ) override
-                {
-                    return rendering::RenderingIntent::PERCEPTUAL;
-                }
-                virtual cpo::uno::Sequence< beans::PropertyValue > SAL_CALL getProperties(  ) override
-                {
-                    return cpo::uno::Sequence< beans::PropertyValue >();
-                }
-                virtual cpo::uno::Sequence< double > SAL_CALL convertColorSpace( const cpo::uno::Sequence< double >& deviceColor,
-                                                                            const uno::Reference< rendering::XColorSpace >& targetColorSpace ) override
-                {
-                    // TODO(P3): if we know anything about target
-                    // colorspace, this can be greatly sped up
-                    cpo::uno::Sequence<rendering::ARGBColor> aIntermediate(
-                        convertToARGB(deviceColor));
-                    return targetColorSpace->convertFromARGB(aIntermediate);
-                }
-                virtual cpo::uno::Sequence< rendering::RGBColor > SAL_CALL convertToRGB( const cpo::uno::Sequence< double >& deviceColor ) override
-                {
-                    const sal_Int32 nLen(deviceColor.getLength());
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::RGBColor > aRes(nLen/4);
-                    rendering::RGBColor* pOut( aRes.getArray() );
-                    for (sal_Int32 i = 0; i < nLen; i += 4)
-                    {
-                        *pOut++ = rendering::RGBColor(deviceColor[i], deviceColor[i+1], deviceColor[i+2]);
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< rendering::ARGBColor > SAL_CALL convertToARGB( const cpo::uno::Sequence< double >& deviceColor ) override
-                {
-                    const sal_Int32 nLen(deviceColor.getLength());
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::ARGBColor > aRes(nLen/4);
-                    rendering::ARGBColor* pOut( aRes.getArray() );
-                    for (sal_Int32 i = 0; i < nLen; i += 4)
-                    {
-                        *pOut++ = rendering::ARGBColor(1.0, deviceColor[i], deviceColor[i+1], deviceColor[i+2]);
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< rendering::ARGBColor > SAL_CALL convertToPARGB( const cpo::uno::Sequence< double >& deviceColor ) override
-                {
-                    const sal_Int32 nLen(deviceColor.getLength());
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::ARGBColor > aRes(nLen/4);
-                    rendering::ARGBColor* pOut( aRes.getArray() );
-                    for (sal_Int32 i = 0; i < nLen; i += 4)
-                    {
-                        *pOut++ = rendering::ARGBColor(1.0, deviceColor[i], deviceColor[i+1], deviceColor[i+2]);
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< double > SAL_CALL convertFromRGB( const cpo::uno::Sequence< rendering::RGBColor >& rgbColor ) override
-                {
-                    cpo::uno::Sequence<double> aRes(rgbColor.getLength() * 4);
-                    double* pColors=aRes.getArray();
-                    for (auto& color : rgbColor)
-                    {
-                        *pColors++ = color.Red;
-                        *pColors++ = color.Green;
-                        *pColors++ = color.Blue;
-                        *pColors++ = 1.0; // the value does not matter
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< double > SAL_CALL convertFromARGB( const cpo::uno::Sequence< rendering::ARGBColor >& rgbColor ) override
-                {
-                    cpo::uno::Sequence<double> aRes(rgbColor.getLength() * 4);
-                    double* pColors=aRes.getArray();
-                    for (auto& color : rgbColor)
-                    {
-                        *pColors++ = color.Red;
-                        *pColors++ = color.Green;
-                        *pColors++ = color.Blue;
-                        *pColors++ = 1.0; // the value does not matter
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< double > SAL_CALL convertFromPARGB( const cpo::uno::Sequence< rendering::ARGBColor >& rgbColor ) override
-                {
-                    cpo::uno::Sequence<double> aRes(rgbColor.getLength() * 4);
-                    double* pColors=aRes.getArray();
-                    for (auto& color : rgbColor)
-                    {
-                        *pColors++ = color.Red / color.Alpha;
-                        *pColors++ = color.Green / color.Alpha;
-                        *pColors++ = color.Blue / color.Alpha;
-                        *pColors++ = 1.0; // the value does not matter
-                    }
-                    return aRes;
-                }
-
-                // XIntegerBitmapColorSpace
-                virtual ::sal_Int32 SAL_CALL getBitsPerPixel(  ) override
-                {
-                    return 32;
-                }
-                virtual cpo::uno::Sequence< ::sal_Int32 > SAL_CALL getComponentBitCounts(  ) override
-                {
-                    return maBitCounts;
-                }
-                virtual ::sal_Int8 SAL_CALL getEndianness(  ) override
-                {
-                    return util::Endianness::LITTLE;
-                }
-                virtual cpo::uno::Sequence<double> SAL_CALL convertFromIntegerColorSpace( const cpo::uno::Sequence< ::sal_Int8 >& deviceColor,
-                                                                                     const uno::Reference< rendering::XColorSpace >& targetColorSpace ) override
-                {
-                    if( dynamic_cast<StandardNoAlphaColorSpace*>(targetColorSpace.get()) )
-                    {
-                        const sal_Int32 nLen(deviceColor.getLength());
-                        ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                             "number of channels no multiple of 4",
-                                             static_cast<rendering::XColorSpace*>(this), 0);
-
-                        cpo::uno::Sequence<double> aRes(nLen);
-                        double* pOut( aRes.getArray() );
-                        for (sal_Int32 i = 0; i < nLen; i += 4)
-                        {
-                            *pOut++ = vcl::unotools::toDoubleColor(deviceColor[i]);
-                            *pOut++ = vcl::unotools::toDoubleColor(deviceColor[i+1]);
-                            *pOut++ = vcl::unotools::toDoubleColor(deviceColor[i+2]);
-                            *pOut++ = 1.0;
-                        }
-                        return aRes;
-                    }
-                    else
-                    {
-                        // TODO(P3): if we know anything about target
-                        // colorspace, this can be greatly sped up
-                        cpo::uno::Sequence<rendering::ARGBColor> aIntermediate(
-                            convertIntegerToARGB(deviceColor));
-                        return targetColorSpace->convertFromARGB(aIntermediate);
-                    }
-                }
-                virtual cpo::uno::Sequence< ::sal_Int8 > SAL_CALL convertToIntegerColorSpace( const cpo::uno::Sequence< ::sal_Int8 >& deviceColor,
-                                                                                         const uno::Reference< rendering::XIntegerBitmapColorSpace >& targetColorSpace ) override
-                {
-                    if( dynamic_cast<StandardNoAlphaColorSpace*>(targetColorSpace.get()) )
-                    {
-                        // it's us, so simply pass-through the data
-                        return deviceColor;
-                    }
-                    else
-                    {
-                        // TODO(P3): if we know anything about target
-                        // colorspace, this can be greatly sped up
-                        cpo::uno::Sequence<rendering::ARGBColor> aIntermediate(
-                            convertIntegerToARGB(deviceColor));
-                        return targetColorSpace->convertIntegerFromARGB(aIntermediate);
-                    }
-                }
-                virtual cpo::uno::Sequence< rendering::RGBColor > SAL_CALL convertIntegerToRGB( const cpo::uno::Sequence< ::sal_Int8 >& deviceColor ) override
-                {
-                    const sal_Int32 nLen(deviceColor.getLength());
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::RGBColor > aRes(nLen/4);
-                    rendering::RGBColor* pOut( aRes.getArray() );
-                    for (sal_Int32 i = 0; i < nLen; i += 4)
-                    {
-                        *pOut++ = rendering::RGBColor(
-                            vcl::unotools::toDoubleColor(deviceColor[i]),
-                            vcl::unotools::toDoubleColor(deviceColor[i+1]),
-                            vcl::unotools::toDoubleColor(deviceColor[i+2]));
-                    }
-                    return aRes;
-                }
-
-                virtual cpo::uno::Sequence< rendering::ARGBColor > SAL_CALL convertIntegerToARGB( const cpo::uno::Sequence< ::sal_Int8 >& deviceColor ) override
-                {
-                    const sal_Int32 nLen(deviceColor.getLength());
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::ARGBColor > aRes(nLen/4);
-                    rendering::ARGBColor* pOut( aRes.getArray() );
-                    for (sal_Int32 i = 0; i < nLen; i += 4)
-                    {
-                        *pOut++ = rendering::ARGBColor(
-                            1.0,
-                            vcl::unotools::toDoubleColor(deviceColor[i]),
-                            vcl::unotools::toDoubleColor(deviceColor[i+1]),
-                            vcl::unotools::toDoubleColor(deviceColor[i+2]));
-                    }
-                    return aRes;
-                }
-
-                virtual cpo::uno::Sequence< rendering::ARGBColor > SAL_CALL convertIntegerToPARGB( const cpo::uno::Sequence< ::sal_Int8 >& deviceColor ) override
-                {
-                    const sal_Int32 nLen(deviceColor.getLength());
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::ARGBColor > aRes(nLen/4);
-                    rendering::ARGBColor* pOut( aRes.getArray() );
-                    for (sal_Int32 i = 0; i < nLen; i += 4)
-                    {
-                        *pOut++ = rendering::ARGBColor(
-                            1.0,
-                            vcl::unotools::toDoubleColor(deviceColor[i]),
-                            vcl::unotools::toDoubleColor(deviceColor[i+1]),
-                            vcl::unotools::toDoubleColor(deviceColor[i+2]));
-                    }
-                    return aRes;
-                }
-
-                virtual cpo::uno::Sequence< ::sal_Int8 > SAL_CALL convertIntegerFromRGB( const cpo::uno::Sequence< rendering::RGBColor >& rgbColor ) override
-                {
-                    cpo::uno::Sequence<sal_Int8> aRes(rgbColor.getLength() * 4);
-                    sal_Int8* pColors=aRes.getArray();
-                    for (auto& color : rgbColor)
-                    {
-                        *pColors++ = vcl::unotools::toByteColor(color.Red);
-                        *pColors++ = vcl::unotools::toByteColor(color.Green);
-                        *pColors++ = vcl::unotools::toByteColor(color.Blue);
-                        *pColors++ = 1.0;
-                    }
-                    return aRes;
-                }
-
-                virtual cpo::uno::Sequence< ::sal_Int8 > SAL_CALL convertIntegerFromARGB( const cpo::uno::Sequence< rendering::ARGBColor >& rgbColor ) override
-                {
-                    cpo::uno::Sequence<sal_Int8> aRes(rgbColor.getLength() * 4);
-                    sal_Int8* pColors=aRes.getArray();
-                    for (auto& color : rgbColor)
-                    {
-                        *pColors++ = vcl::unotools::toByteColor(color.Red);
-                        *pColors++ = vcl::unotools::toByteColor(color.Green);
-                        *pColors++ = vcl::unotools::toByteColor(color.Blue);
-                        *pColors++ = -1;
-                    }
-                    return aRes;
-                }
-
-                virtual cpo::uno::Sequence< ::sal_Int8 > SAL_CALL convertIntegerFromPARGB( const cpo::uno::Sequence< rendering::ARGBColor >& rgbColor ) override
-                {
-                    cpo::uno::Sequence<sal_Int8> aRes(rgbColor.getLength() * 4);
-                    sal_Int8* pColors=aRes.getArray();
-                    for (auto& color : rgbColor)
-                    {
-                        *pColors++ = vcl::unotools::toByteColor(color.Red / color.Alpha);
-                        *pColors++ = vcl::unotools::toByteColor(color.Green / color.Alpha);
-                        *pColors++ = vcl::unotools::toByteColor(color.Blue / color.Alpha);
-                        *pColors++ = -1;
-                    }
-                    return aRes;
-                }
-
-            public:
-                StandardNoAlphaColorSpace() :
-                    maComponentTags(3),
-                    maBitCounts(3)
-                {
-                    sal_Int8*  pTags = maComponentTags.getArray();
-                    sal_Int32* pBitCounts = maBitCounts.getArray();
-                    pTags[0] = rendering::ColorComponentTag::RGB_RED;
-                    pTags[1] = rendering::ColorComponentTag::RGB_GREEN;
-                    pTags[2] = rendering::ColorComponentTag::RGB_BLUE;
-
-                    pBitCounts[0] =
-                    pBitCounts[1] =
-                    pBitCounts[2] = 8;
-                }
-            };
-
-        }
-
-        uno::Reference<rendering::XIntegerBitmapColorSpace> const & getStdColorSpace()
-        {
-            static uno::Reference<rendering::XIntegerBitmapColorSpace> SPACE = new StandardColorSpace();
-            return SPACE;
-        }
-
-        uno::Reference<rendering::XIntegerBitmapColorSpace> const & getStdColorSpaceWithoutAlpha()
-        {
-            static uno::Reference<rendering::XIntegerBitmapColorSpace> SPACE = new StandardNoAlphaColorSpace();
-            return SPACE;
-        }
-
-        rendering::IntegerBitmapLayout getStdMemoryLayout( const geometry::IntegerSize2D& rBmpSize )
-        {
-            rendering::IntegerBitmapLayout aLayout;
-
-            aLayout.ScanLines = rBmpSize.Height;
-            aLayout.ScanLineBytes = rBmpSize.Width*4;
-            aLayout.ScanLineStride = aLayout.ScanLineBytes;
-            aLayout.PlaneStride = 0;
-            aLayout.ColorSpace = getStdColorSpace();
-            aLayout.Palette.clear();
-            aLayout.IsMsbFirst = false;
-
-            return aLayout;
-        }
-
-        cpo::uno::Sequence<sal_Int8> colorToStdIntSequence( const ::Color& rColor )
-        {
-            cpo::uno::Sequence<sal_Int8> aRet(4);
-            sal_Int8* pCols( aRet.getArray() );
-#ifdef OSL_BIGENDIAN
-            pCols[0] = rColor.GetRed();
-            pCols[1] = rColor.GetGreen();
-            pCols[2] = rColor.GetBlue();
-            pCols[3] = rColor.GetAlpha();
-#else
-            *reinterpret_cast<sal_Int32*>(pCols) = sal_Int32(rColor);
-#endif
-            return aRet;
-        }
-
         // Create a corrected view transformation out of the give one,
         // which ensures that the rectangle given by (0,0) and
         // rSpriteSize is mapped with its left,top corner to (0,0)
@@ -872,190 +225,6 @@ namespace canvastools
             return outRect;
         }
 
-        bool isInside( const ::basegfx::B2DRange&       rContainedRect,
-                       const ::basegfx::B2DRange&       rTransformRect,
-                       const ::basegfx::B2DHomMatrix&   rTransformation )
-        {
-            if( rContainedRect.isEmpty() || rTransformRect.isEmpty() )
-                return false;
-
-            ::basegfx::B2DPolygon aPoly(
-                ::basegfx::utils::createPolygonFromRect( rTransformRect ) );
-            aPoly.transform( rTransformation );
-
-            return ::basegfx::utils::isInside( aPoly,
-                                               ::basegfx::utils::createPolygonFromRect(
-                                                   rContainedRect ),
-                                               true );
-        }
-
-        namespace
-        {
-            bool clipAreaImpl( ::basegfx::B2IRange*       o_pDestArea,
-                               ::basegfx::B2IRange&       io_rSourceArea,
-                               ::basegfx::B2IPoint&       io_rDestPoint,
-                               const ::basegfx::B2IRange& rSourceBounds,
-                               const ::basegfx::B2IRange& rDestBounds )
-            {
-                const ::basegfx::B2IPoint aSourceTopLeft(
-                    io_rSourceArea.getMinimum() );
-
-                ::basegfx::B2IRange aLocalSourceArea( io_rSourceArea );
-
-                // clip source area (which must be inside rSourceBounds)
-                aLocalSourceArea.intersect( rSourceBounds );
-
-                if( aLocalSourceArea.isEmpty() )
-                    return false;
-
-                // calc relative new source area points (relative to orig
-                // source area)
-                const ::basegfx::B2IVector aUpperLeftOffset(
-                    aLocalSourceArea.getMinimum()-aSourceTopLeft );
-                const ::basegfx::B2IVector aLowerRightOffset(
-                    aLocalSourceArea.getMaximum()-aSourceTopLeft );
-
-                ::basegfx::B2IRange aLocalDestArea( io_rDestPoint + aUpperLeftOffset,
-                                                    io_rDestPoint + aLowerRightOffset );
-
-                // clip dest area (which must be inside rDestBounds)
-                aLocalDestArea.intersect( rDestBounds );
-
-                if( aLocalDestArea.isEmpty() )
-                    return false;
-
-                // calc relative new dest area points (relative to orig
-                // source area)
-                const ::basegfx::B2IVector aDestUpperLeftOffset(
-                    aLocalDestArea.getMinimum()-io_rDestPoint );
-                const ::basegfx::B2IVector aDestLowerRightOffset(
-                    aLocalDestArea.getMaximum()-io_rDestPoint );
-
-                io_rSourceArea = ::basegfx::B2IRange( aSourceTopLeft + aDestUpperLeftOffset,
-                                                      aSourceTopLeft + aDestLowerRightOffset );
-                io_rDestPoint  = aLocalDestArea.getMinimum();
-
-                if( o_pDestArea )
-                    *o_pDestArea = aLocalDestArea;
-
-                return true;
-            }
-        }
-
-        bool clipScrollArea( ::basegfx::B2IRange&                  io_rSourceArea,
-                             ::basegfx::B2IPoint&                  io_rDestPoint,
-                             std::vector< ::basegfx::B2IRange >& o_ClippedAreas,
-                             const ::basegfx::B2IRange&            rBounds )
-        {
-            ::basegfx::B2IRange aResultingDestArea;
-
-            // compute full destination area (to determine uninitialized
-            // areas below)
-            const ::basegfx::B2I64Tuple aRange( io_rSourceArea.getRange() );
-            ::basegfx::B2IRange aInputDestArea( io_rDestPoint.getX(),
-                                                io_rDestPoint.getY(),
-                                                (io_rDestPoint.getX()
-                                                 + static_cast<sal_Int32>(aRange.getX())),
-                                                (io_rDestPoint.getY()
-                                                 + static_cast<sal_Int32>(aRange.getY())) );
-            // limit to output area (no point updating outside of it)
-            aInputDestArea.intersect( rBounds );
-
-            // clip to rBounds
-            if( !clipAreaImpl( &aResultingDestArea,
-                               io_rSourceArea,
-                               io_rDestPoint,
-                               rBounds,
-                               rBounds ) )
-                return false;
-
-            // finally, compute all areas clipped off the total
-            // destination area.
-            ::basegfx::computeSetDifference( o_ClippedAreas,
-                                             aInputDestArea,
-                                             aResultingDestArea );
-
-            return true;
-        }
-
-        ::basegfx::B2IRange spritePixelAreaFromB2DRange( const ::basegfx::B2DRange& rRange )
-        {
-            if( rRange.isEmpty() )
-                return ::basegfx::B2IRange();
-
-            const ::basegfx::B2IPoint aTopLeft( ::basegfx::fround( rRange.getMinX() ),
-                                                ::basegfx::fround( rRange.getMinY() ) );
-            return ::basegfx::B2IRange( aTopLeft,
-                                        aTopLeft + ::basegfx::B2IPoint(
-                                            ::basegfx::fround( rRange.getWidth() ),
-                                            ::basegfx::fround( rRange.getHeight() ) ) );
-        }
-
-        awt::Rectangle getAbsoluteWindowRect( const awt::Rectangle&                  rRect,
-                                              const uno::Reference< awt::XWindow2 >& xWin  )
-        {
-            awt::Rectangle aRetVal( rRect );
-
-            VclPtr<vcl::Window> pWindow = VCLUnoHelper::GetWindow(xWin);
-            if( pWindow )
-            {
-                ::Point aPoint( aRetVal.X,
-                                aRetVal.Y );
-
-                aPoint = pWindow->OutputToScreenPixel( aPoint );
-
-                aRetVal.X = aPoint.X();
-                aRetVal.Y = aPoint.Y();
-            }
-
-            return aRetVal;
-        }
-
-        ::basegfx::B2DPolyPolygon getBoundMarksPolyPolygon( const ::basegfx::B2DRange& rRange )
-        {
-            ::basegfx::B2DPolyPolygon aPolyPoly;
-            ::basegfx::B2DPolygon     aPoly;
-
-            const double nX0( rRange.getMinX() );
-            const double nY0( rRange.getMinY() );
-            const double nX1( rRange.getMaxX() );
-            const double nY1( rRange.getMaxY() );
-
-            aPoly.append( ::basegfx::B2DPoint( nX0+4,
-                                               nY0 ) );
-            aPoly.append( ::basegfx::B2DPoint( nX0,
-                                               nY0 ) );
-            aPoly.append( ::basegfx::B2DPoint( nX0,
-                                               nY0+4 ) );
-            aPolyPoly.append( aPoly ); aPoly.clear();
-
-            aPoly.append( ::basegfx::B2DPoint( nX1-4,
-                                               nY0 ) );
-            aPoly.append( ::basegfx::B2DPoint( nX1,
-                                               nY0 ) );
-            aPoly.append( ::basegfx::B2DPoint( nX1,
-                                               nY0+4 ) );
-            aPolyPoly.append( aPoly ); aPoly.clear();
-
-            aPoly.append( ::basegfx::B2DPoint( nX0+4,
-                                               nY1 ) );
-            aPoly.append( ::basegfx::B2DPoint( nX0,
-                                               nY1 ) );
-            aPoly.append( ::basegfx::B2DPoint( nX0,
-                                               nY1-4 ) );
-            aPolyPoly.append( aPoly ); aPoly.clear();
-
-            aPoly.append( ::basegfx::B2DPoint( nX1-4,
-                                               nY1 ) );
-            aPoly.append( ::basegfx::B2DPoint( nX1,
-                                               nY1 ) );
-            aPoly.append( ::basegfx::B2DPoint( nX1,
-                                               nY1-4 ) );
-            aPolyPoly.append( aPoly );
-
-            return aPolyPoly;
-        }
-
         int calcGradientStepCount( ::basegfx::B2DHomMatrix&      rTotalTransform,
                                    const rendering::ViewState&   viewState,
                                    const rendering::RenderState& renderState,
@@ -1109,32 +278,10 @@ namespace canvastools
             // accumulate non-empty clips into one region
             vcl::Region aClipRegion(true);
 
-            if( viewState.Clip.is() )
-            {
-                ::basegfx::B2DPolyPolygon aClipPoly(
-                    ::basegfx::unotools::b2DPolyPolygonFromXPolyPolygon2D(viewState.Clip) );
-
-                if( aClipPoly.count() )
-                {
-                    // setup non-empty clipping
-                    ::basegfx::B2DHomMatrix aMatrix;
-                    aClipPoly.transform(
-                        ::basegfx::unotools::homMatrixFromAffineMatrix( aMatrix,
-                                                                        viewState.AffineTransform ) );
-
-                    aClipRegion = vcl::Region::GetRegionFromPolyPolygon( ::tools::PolyPolygon( aClipPoly ) );
-                }
-                else
-                {
-                    // clip polygon is empty
-                    aClipRegion.SetEmpty();
-                }
-            }
-
             if( renderState.Clip.is() )
             {
                 ::basegfx::B2DPolyPolygon aClipPoly(
-                    ::basegfx::unotools::b2DPolyPolygonFromXPolyPolygon2D(renderState.Clip) );
+                    b2DPolyPolygonFromXPolyPolygon2D(renderState.Clip) );
 
                 ::basegfx::B2DHomMatrix aMatrix;
                 aClipPoly.transform(mergeViewAndRenderTransform(aMatrix, viewState, renderState));
@@ -1172,6 +319,117 @@ namespace canvastools
                 if (rPropVal.Name == "EmphasisMark")
                     rPropVal.Value >>= rEmphasisMark;
             }
+        }
+
+        ::basegfx::B2DPolyPolygon b2DPolyPolygonFromXPolyPolygon2D( const uno::Reference< rendering::XPolyPolygon2D >& xPoly )
+        {
+            ::canvastools::UnoPolyPolygon* pPolyImpl =
+                dynamic_cast< ::canvastools::UnoPolyPolygon* >( xPoly.get() );
+
+            if( pPolyImpl )
+            {
+                return pPolyImpl->getPolyPolygon();
+            }
+            else
+            {
+                // not a known implementation object - try data source
+                // interfaces
+                const sal_Int32 nPolys( xPoly->getNumberOfPolygons() );
+
+                uno::Reference< rendering::XBezierPolyPolygon2D > xBezierPoly(
+                    xPoly,
+                    uno::UNO_QUERY );
+
+                if( xBezierPoly.is() )
+                {
+                    return ::basegfx::unotools::polyPolygonFromBezier2DSequenceSequence(
+                        xBezierPoly->getBezierSegments( 0,
+                                                        nPolys,
+                                                        0,
+                                                        -1 ) );
+                }
+                else
+                {
+                    uno::Reference< rendering::XLinePolyPolygon2D > xLinePoly(
+                        xPoly,
+                        uno::UNO_QUERY );
+
+                    // no implementation class and no data provider
+                    // found - contract violation.
+                    if( !xLinePoly.is() )
+                    {
+                        throw lang::IllegalArgumentException(
+                            u"basegfx::unotools::b2DPolyPolygonFromXPolyPolygon2D(): Invalid input"
+                            "poly-polygon, cannot retrieve vertex data"_ustr,
+                            uno::Reference< uno::XInterface >(),
+                            0 );
+                    }
+
+                    return ::basegfx::unotools::polyPolygonFromPoint2DSequenceSequence(
+                        xLinePoly->getPoints( 0,
+                                              nPolys,
+                                              0,
+                                              -1 ));
+                }
+            }
+        }
+
+        uno::Reference< rendering::XPolyPolygon2D > xPolyPolygonFromB2DPolyPolygon( const uno::Reference< rendering::XGraphicDevice >&  xGraphicDevice,
+                                                                                    const ::basegfx::B2DPolyPolygon&                    rPolyPoly    )
+        {
+            uno::Reference< rendering::XPolyPolygon2D > xRes;
+
+            if( !xGraphicDevice.is() )
+                return xRes;
+
+            const sal_uInt32 nNumPolies( rPolyPoly.count() );
+            sal_uInt32 i;
+
+            if( rPolyPoly.areControlPointsUsed() )
+            {
+                xRes = xGraphicDevice->createCompatibleBezierPolyPolygon(
+                              basegfx::unotools::bezierSequenceSequenceFromB2DPolyPolygon( rPolyPoly ) );
+            }
+            else
+            {
+                xRes = xGraphicDevice->createCompatibleLinePolyPolygon(
+                              basegfx::unotools::pointSequenceSequenceFromB2DPolyPolygon( rPolyPoly ) );
+            }
+
+            for( i=0; i<nNumPolies; ++i )
+            {
+                xRes->setClosed( i, rPolyPoly.getB2DPolygon(i).isClosed() );
+            }
+
+            return xRes;
+        }
+
+        uno::Reference< rendering::XPolyPolygon2D > xPolyPolygonFromB2DPolygon( const uno::Reference< rendering::XGraphicDevice >&  xGraphicDevice,
+                                                                                const ::basegfx::B2DPolygon&                        rPoly    )
+        {
+            uno::Reference< rendering::XPolyPolygon2D > xRes;
+
+            if( !xGraphicDevice.is() )
+                return xRes;
+
+            if( rPoly.areControlPointsUsed() )
+            {
+                cpo::uno::Sequence< cpo::uno::Sequence< geometry::RealBezierSegment2D > > outputSequence{ basegfx::unotools::bezierSequenceFromB2DPolygon( rPoly )};
+
+                xRes = xGraphicDevice->createCompatibleBezierPolyPolygon( outputSequence );
+            }
+            else
+            {
+                cpo::uno::Sequence< cpo::uno::Sequence< geometry::RealPoint2D > > outputSequence{
+                 basegfx::unotools::pointSequenceFromB2DPolygon( rPoly )};
+
+                xRes = xGraphicDevice->createCompatibleLinePolyPolygon( outputSequence );
+            }
+
+            if( xRes.is() && rPoly.isClosed() )
+                xRes->setClosed( 0, true );
+
+            return xRes;
         }
 
 } // namespace

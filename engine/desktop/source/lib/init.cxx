@@ -58,6 +58,7 @@
 #include <osl/detail/emscripten-bootstrap.h>
 #endif
 
+#include <cassert>
 #include <algorithm>
 #include <memory>
 #include <iostream>
@@ -98,6 +99,7 @@
 #include <comphelper/dispatchcommand.hxx>
 #include <comphelper/embeddedobjectcontainer.hxx>
 #include <comphelper/kit.hxx>
+#include <comphelper/legacyunoapinotice.hxx>
 #include <comphelper/processfactory.hxx>
 #include <comphelper/string.hxx>
 #include <comphelper/profilezone.hxx>
@@ -139,7 +141,7 @@
 #include <com/sun/star/bridge/BridgeFactory.hpp>
 #include <com/sun/star/bridge/XBridgeFactory.hpp>
 #include <com/sun/star/bridge/XBridge.hpp>
-#include <com/sun/star/uno/XNamingService.hpp>
+#include <cpo/uno/XNamingService.hpp>
 
 #include <com/sun/star/xml/crypto/SEInitializer.hpp>
 #include <com/sun/star/xml/crypto/XSEInitializer.hpp>
@@ -1264,8 +1266,7 @@ static bool doc_paste(COKitDocument* pThis,
                       const char* pMimeType,
                       const char* pData,
                       size_t nSize);
-static void doc_installClipboardProvider(COKitDocument* pThis,
-                                         const COKitClipboardProvider* pProvider);
+static void doc_flushClipboard(COKitDocument* pThis);
 static void doc_setGraphicSelection (COKitDocument* pThis,
                                   int nType,
                                   int nX,
@@ -1555,7 +1556,7 @@ LibLODocument_Impl::LibLODocument_Impl(uno::Reference <css::lang::XComponent> xC
         m_pDocumentClass->setClipboard = doc_setClipboard;
         m_pDocumentClass->transferClipboardFromView = doc_transferClipboardFromView;
         m_pDocumentClass->paste = doc_paste;
-        m_pDocumentClass->installClipboardProvider = doc_installClipboardProvider;
+        m_pDocumentClass->flushClipboard = doc_flushClipboard;
         m_pDocumentClass->setGraphicSelection = doc_setGraphicSelection;
         m_pDocumentClass->resetSelection = doc_resetSelection;
         m_pDocumentClass->getCommandValues = doc_getCommandValues;
@@ -1779,6 +1780,42 @@ void CallbackFlushHandler::viewCallbackWithViewId(int nType, const OString& pPay
     queue(nType, callbackData);
 }
 
+void CallbackFlushHandler::scheduleVectorPrimitivesDelta(int nPart)
+{
+    // Repeated invalidations of the same part between two flushes
+    // collapse into a single delta, computed at flush time.
+    m_vectorDeltaParts.insert(nPart);
+}
+
+void CallbackFlushHandler::flushVectorPrimitivesDeltas()
+{
+    if (m_vectorDeltaParts.empty())
+        return;
+
+    std::set<int> aParts;
+    aParts.swap(m_vectorDeltaParts);
+
+    ITiledRenderable* pDocument = getTiledRenderable(m_pDocument);
+    if (!pDocument)
+        return;
+
+    for (const int nPart : aParts)
+    {
+        // Computing the delta at delivery time reads the document after
+        // the change that triggered the invalidation has fully landed.
+        // The command tracks the version last pushed to this view and
+        // returns the delta since it, so the mark advances only for a
+        // delta that is handed to the client.
+        const OString aCommand = ".uno:VectorPrimitives?part=" + OString::number(nPart)
+                                 + "&pushdelta=1&viewid=" + OString::number(m_viewId);
+        tools::JsonWriter aJsonWriter;
+        pDocument->getCommandValues(aJsonWriter,
+                                    std::string_view(aCommand.getStr(), aCommand.getLength()));
+        const OString aDelta = aJsonWriter.finishAndGetAsOString();
+        m_pCallback(KIT_CALLBACK_VECTOR_PRIMITIVES_DELTA, aDelta.getStr(), m_pData);
+    }
+}
+
 void CallbackFlushHandler::viewInvalidateTilesCallback(const tools::Rectangle* pRect, int nPart, int nMode)
 {
     tools::Rectangle& rPaintedTiles = m_aPaintedTiles[nPart][nMode];
@@ -1788,9 +1825,16 @@ void CallbackFlushHandler::viewInvalidateTilesCallback(const tools::Rectangle* p
     {
         // A vector-rendered view paints no bitmap tiles, so there is no
         // painted-tile bounding box to crop against. Forward the invalidation
-        // as-is, or invalidate everything when the rect is null, so the client
-        // re-fetches the changed vector content.
+        // as-is, or invalidate everything when the rect is null.
         aRect = pRect ? *pRect : RectangleAndPart::emptyAllRectangle;
+
+        // Push the changed slide's delta to this view so it does not have to
+        // request it. An invalidation without a rectangle may be a
+        // structural change a delta does not describe, so leave it to a
+        // full re-fetch by the client, whether it names a part or covers
+        // the whole document.
+        if (pRect && nPart >= 0)
+            scheduleVectorPrimitivesDelta(nPart);
     }
     else if (rPaintedTiles.IsEmpty())
     {
@@ -2551,7 +2595,8 @@ void CallbackFlushHandler::enqueueUpdatedType( int type, const SfxViewShell* vie
     std::optional<OString> payload = viewShell->getKitPayload( type, viewId );
     if(!payload)
         return; // No actual payload to send.
-    CallbackData callbackData(*payload, viewId);
+    CallbackData callbackData = isUpdatedTypePerViewId(type)
+        ? CallbackData(*payload, viewId) : CallbackData(*payload);
     m_queue1.emplace_back(type);
     m_queue2.emplace_back(callbackData);
     SAL_INFO("kit", "Queued updated [" << type << "]: [" << callbackData.getPayload()
@@ -2663,6 +2708,11 @@ void CallbackFlushHandler::invoke()
 
         m_pCallback(type, payload.getStr(), m_pData);
     }
+
+    // The deltas of the changed vector parts follow the queued
+    // messages, so the client sees each invalidation before the delta
+    // that answers it.
+    flushVectorPrimitivesDeltas();
 
     m_queue1.clear();
     m_queue2.clear();
@@ -2836,12 +2886,19 @@ static char* lo_extractDocumentStructureRequest(COKit* pThis, const char* pFileP
 
 static int lo_getDocsCount(COKit* pThis);
 
+static void lo_installClipboardProvider(COKit* pThis, const COKitClipboardProvider* pProvider);
+
+static int lo_getGlobalClipboard(COKit* pThis, const char** pMimeTypes, size_t* pOutCount,
+                                 char*** pOutMimeTypes, size_t** pOutSizes, char*** pOutStreams);
+
 static void lo_executeScript(
     char const * script, char ** result, char ** error,
-    void (*proxyCallback) (void * data, char const * payload), void * proxyCallbackData);
+    void (*proxyCallback) (void * data, char const * payload), void * proxyCallbackData,
+    bool * usedLegacyUnoApi);
 static void lo_deliverProxyResult(char const * callId, char const * jsonValue);
 static void lo_cancelProxyCalls();
 static int lo_isExpectedReentry();
+static bool lo_takeLegacyUnoApiUseFlag();
 
 LibCO_Impl::LibCO_Impl()
     : m_pOfficeClass( gOfficeClass.lock() )
@@ -2885,6 +2942,9 @@ LibCO_Impl::LibCO_Impl()
         m_pOfficeClass->deliverProxyResult = lo_deliverProxyResult;
         m_pOfficeClass->cancelProxyCalls = lo_cancelProxyCalls;
         m_pOfficeClass->isExpectedReentry = lo_isExpectedReentry;
+        m_pOfficeClass->installClipboardProvider = lo_installClipboardProvider;
+        m_pOfficeClass->getGlobalClipboard = lo_getGlobalClipboard;
+        m_pOfficeClass->takeLegacyUnoApiUseFlag = lo_takeLegacyUnoApiUseFlag;
 
         gOfficeClass = m_pOfficeClass;
     }
@@ -3573,7 +3633,7 @@ public:
 
     // XInstanceProvider
     virtual css::uno::Reference<css::uno::XInterface>
-        SAL_CALL getInstance(const OUString& aName) override;
+        getInstance(const OUString& aName) override;
 };
 
 // InstanceProvider
@@ -3599,7 +3659,7 @@ Reference<XInterface> FunctionBasedURPInstanceProvider::getInstance(const OUStri
     {
         Reference<XNamingService> rNamingService(
             m_rContext->getServiceManager()->createInstanceWithContext(
-                u"com.sun.star.uno.NamingService"_ustr, m_rContext),
+                u"cpo.uno.NamingService"_ustr, m_rContext),
             UNO_QUERY);
         if (rNamingService.is())
         {
@@ -3621,12 +3681,12 @@ public:
 
     // These overridden member functions use "read" and "write" from the point of view of LO,
     // i.e. the opposite to how startURP() uses them.
-    virtual sal_Int32 SAL_CALL read(Sequence<sal_Int8>& rReadBytes,
+    virtual sal_Int32 read(Sequence<sal_Int8>& rReadBytes,
                                     sal_Int32 nBytesToRead) override;
-    virtual void SAL_CALL write(const Sequence<sal_Int8>& aData) override;
-    virtual void SAL_CALL flush() override;
-    virtual void SAL_CALL close() override;
-    virtual OUString SAL_CALL getDescription() override;
+    virtual void write(const Sequence<sal_Int8>& aData) override;
+    virtual void flush() override;
+    virtual void close() override;
+    virtual OUString getDescription() override;
     void setBridge(const Reference<XBridge>&);
     void* getContext();
     inline static int g_connectionCount = 0;
@@ -5325,19 +5385,21 @@ class DispatchResultListener : public cppu::WeakImplHelper<css::frame::XDispatch
     const std::shared_ptr<CallbackFlushHandler> mpCallback; ///< Callback to call.
     const std::chrono::steady_clock::time_point mSaveTime; //< The time we started saving.
     const bool mbWasModified; //< Whether or not the document was modified before saving.
+    const css::uno::Reference<css::lang::XComponent> mxComponent; //< The document the command ran on.
 
 public:
     DispatchResultListener(const char* pCommand, std::shared_ptr<CallbackFlushHandler> pCallback,
-                           bool bWasModified)
+                           bool bWasModified, css::uno::Reference<css::lang::XComponent> xComponent)
         : maCommand(pCommand)
         , mpCallback(std::move(pCallback))
         , mSaveTime(std::chrono::steady_clock::now())
         , mbWasModified(bWasModified)
+        , mxComponent(std::move(xComponent))
     {
         assert(mpCallback);
     }
 
-    virtual void SAL_CALL dispatchFinished(const css::frame::DispatchResultEvent& rEvent) override
+    virtual void dispatchFinished(const css::frame::DispatchResultEvent& rEvent) override
     {
         tools::JsonWriter aJson;
         aJson.put("commandName", maCommand);
@@ -5348,7 +5410,21 @@ public:
             aJson.put("success", bSuccess);
         }
 
-        unoAnyToJson(aJson, "result", rEvent.Result);
+        // A failed save comes back with a void result, so the reason the store gave would be lost.
+        // The store recorded its reason on the document shell as it failed, so carry that as the
+        // result instead.
+        OUString aStoreError;
+        if (SfxObjectShell* pShell = SfxObjectShell::GetShellFromComponent(mxComponent))
+            aStoreError = pShell->GetLastStoreErrorMessage();
+        if (maCommand == ".uno:Save" && rEvent.State == frame::DispatchResultState::FAILURE
+            && !rEvent.Result.hasValue() && !aStoreError.isEmpty())
+        {
+            auto resultNode = aJson.startNode("result");
+            aJson.put("type", "string");
+            aJson.put("value", aStoreError.toUtf8());
+        }
+        else
+            unoAnyToJson(aJson, "result", rEvent.Result);
         aJson.put("wasModified", mbWasModified);
         aJson.put("startUnixTimeMics",
                   std::chrono::time_point_cast<std::chrono::microseconds>(mSaveTime)
@@ -5360,7 +5436,7 @@ public:
         mpCallback->queue(KIT_CALLBACK_UNO_COMMAND_RESULT, aJson.finishAndGetAsOString());
     }
 
-    virtual void SAL_CALL disposing(const css::lang::EventObject&) override {}
+    virtual void disposing(const css::lang::EventObject&) override {}
 };
 
 } // anonymous namespace
@@ -5671,6 +5747,29 @@ static bool isCommandAllowed(std::u16string_view command)
     return std::find(std::begin(denyList), std::end(denyList), command) == std::end(denyList);
 }
 
+static void lcl_reportSaveResult(LibLODocument_Impl* pDocument, int nView, const OString& rResult)
+{
+    // Report result to the provided view
+    auto handlerIt = pDocument->mpCallbackFlushHandlers.find(nView);
+    if (handlerIt != pDocument->mpCallbackFlushHandlers.end() && handlerIt->second)
+    {
+        handlerIt->second->queue(KIT_CALLBACK_UNO_COMMAND_RESULT, rResult);
+        return;
+    }
+
+    // Fallback to reporting to at least some view, if possible, of the result
+    for (const auto& rPair : pDocument->mpCallbackFlushHandlers)
+    {
+        if (rPair.second)
+        {
+            rPair.second->queue(KIT_CALLBACK_UNO_COMMAND_RESULT, rResult);
+            return;
+        }
+    }
+
+    SAL_WARN("kit", "Could not report .uno:Save result: no callback handler");
+}
+
 static void doc_postUnoCommand(COKitDocument* pThis, const char* pCommand, const char* pArguments, bool bNotifyWhenFinished)
 {
     comphelper::ProfileZone aZone("doc_postUnoCommand");
@@ -5701,7 +5800,16 @@ static void doc_postUnoCommand(COKitDocument* pThis, const char* pCommand, const
     const int nView = KitHelper::getViewId(pDocument->mnDocumentId);
     SfxViewShell* pViewShell = KitHelper::getViewOfId(nView);
     if (!pViewShell)
+    {
+        if (aCommand == ".uno:Save")
+        {
+            tools::JsonWriter aJson;
+            aJson.put("commandName", pCommand);
+            aJson.put("success", false);
+            lcl_reportSaveResult(pDocument, nView, aJson.finishAndGetAsOString());
+        }
         return;
+    }
     assert(nView == pViewShell->GetViewShellId().get() && "otherwise we couldn't have found it");
     SfxObjectShell* pDocSh = pViewShell->GetObjectShell();
 
@@ -5716,6 +5824,10 @@ static void doc_postUnoCommand(COKitDocument* pThis, const char* pCommand, const
     // handle potential interaction
     if (gImpl && aCommand == ".uno:Save")
     {
+        // Drop any message left by an earlier store so a success does not report a stale one.
+        if (pDocSh)
+            pDocSh->SetLastStoreErrorMessage(OUString());
+
         // Check if saving a PDF file
         OUString aMimeType = lcl_getCurrentDocumentMimeType(pDocument);
         if (pDocSh && pDocSh->IsModified() && aMimeType == "application/pdf")
@@ -5732,9 +5844,7 @@ static void doc_postUnoCommand(COKitDocument* pThis, const char* pCommand, const
             tools::JsonWriter aJson;
             aJson.put("commandName", pCommand);
             aJson.put("success", bResult);
-            auto handlerIt = pDocument->mpCallbackFlushHandlers.find(nView);
-            if (handlerIt != pDocument->mpCallbackFlushHandlers.end() && handlerIt->second)
-                handlerIt->second->queue(KIT_CALLBACK_UNO_COMMAND_RESULT, aJson.finishAndGetAsOString());
+            lcl_reportSaveResult(pDocument, nView, aJson.finishAndGetAsOString());
             return;
         }
 
@@ -5770,9 +5880,7 @@ static void doc_postUnoCommand(COKitDocument* pThis, const char* pCommand, const
                 aJson.put("type", "string");
                 aJson.put("value", "unmodified");
             }
-            auto handlerIt = pDocument->mpCallbackFlushHandlers.find(nView);
-            if (handlerIt != pDocument->mpCallbackFlushHandlers.end() && handlerIt->second)
-                handlerIt->second->queue(KIT_CALLBACK_UNO_COMMAND_RESULT, aJson.finishAndGetAsOString());
+            lcl_reportSaveResult(pDocument, nView, aJson.finishAndGetAsOString());
             return;
         }
     }
@@ -5961,7 +6069,8 @@ static void doc_postUnoCommand(COKitDocument* pThis, const char* pCommand, const
     {
         bResult = comphelper::dispatchCommand(aCommand, comphelper::containerToSequence(aPropertyValuesVector),
                 new DispatchResultListener(pCommand, pDocument->mpCallbackFlushHandlers[nView],
-                                           pDocSh && pDocSh->IsModified()));
+                                           pDocSh && pDocSh->IsModified(),
+                                           pDocument->mxComponent));
     }
     else
         bResult = comphelper::dispatchCommand(aCommand, comphelper::containerToSequence(aPropertyValuesVector));
@@ -6496,35 +6605,17 @@ static int doc_getSelectionTypeAndText(COKitDocument* pThis, const char* pMimeTy
     return KIT_SELTYPE_TEXT;
 }
 
-static int doc_getClipboard(COKitDocument* pThis,
-                            const char **pMimeTypes,
-                            size_t      *pOutCount,
-                            char      ***pOutMimeTypes,
-                            size_t     **pOutSizes,
-                            char      ***pOutStreams)
+// Serialize the current clipboard's contents into the out parameters. The
+// caller holds the solar mutex and has already zeroed the out parameters. The
+// clipboard is whichever getClipboardForCurView returns: the per-view one on
+// the collaborative server, or the single shared one in the desktop app.
+// Returns 1 on success, 0 when there is nothing on the clipboard.
+static int fetchClipboardContents(const char **pMimeTypes,
+                                  size_t      *pOutCount,
+                                  char      ***pOutMimeTypes,
+                                  size_t     **pOutSizes,
+                                  char      ***pOutStreams)
 {
-    comphelper::ProfileZone aZone("doc_getClipboard");
-
-    SolarMutexGuard aGuard;
-    SetLastExceptionMsg();
-
-    assert (pOutCount);
-    assert (pOutMimeTypes);
-    assert (pOutSizes);
-    assert (pOutStreams);
-
-    *pOutCount = 0;
-    *pOutMimeTypes = nullptr;
-    *pOutSizes = nullptr;
-    *pOutStreams = nullptr;
-
-    ITiledRenderable* pDoc = getTiledRenderable(pThis);
-    if (!pDoc)
-    {
-        SetLastExceptionMsg(u"Document doesn't support tiled rendering"_ustr);
-        return 0;
-    }
-
     rtl::Reference<KitClipboard> xClip(KitClipboardFactory::getClipboardForCurView());
 
     css::uno::Reference<css::datatransfer::XTransferable> xTransferable = xClip->getContents();
@@ -6584,6 +6675,67 @@ static int doc_getClipboard(COKitDocument* pThis,
     return 1;
 }
 
+static int doc_getClipboard(COKitDocument* pThis,
+                            const char **pMimeTypes,
+                            size_t      *pOutCount,
+                            char      ***pOutMimeTypes,
+                            size_t     **pOutSizes,
+                            char      ***pOutStreams)
+{
+    comphelper::ProfileZone aZone("doc_getClipboard");
+
+    SolarMutexGuard aGuard;
+    SetLastExceptionMsg();
+
+    assert (pOutCount);
+    assert (pOutMimeTypes);
+    assert (pOutSizes);
+    assert (pOutStreams);
+
+    *pOutCount = 0;
+    *pOutMimeTypes = nullptr;
+    *pOutSizes = nullptr;
+    *pOutStreams = nullptr;
+
+    ITiledRenderable* pDoc = getTiledRenderable(pThis);
+    if (!pDoc)
+    {
+        SetLastExceptionMsg(u"Document doesn't support tiled rendering"_ustr);
+        return 0;
+    }
+
+    return fetchClipboardContents(pMimeTypes, pOutCount, pOutMimeTypes, pOutSizes, pOutStreams);
+}
+
+// Office-level clipboard read for the desktop app's one shared clipboard. It
+// needs no document, because the shared clipboard is process-global. The
+// per-document doc_getClipboard stays for the collaborative server, where the
+// clipboard is per view.
+static int lo_getGlobalClipboard(COKit* /*pThis*/,
+                                 const char **pMimeTypes,
+                                 size_t      *pOutCount,
+                                 char      ***pOutMimeTypes,
+                                 size_t     **pOutSizes,
+                                 char      ***pOutStreams)
+{
+    comphelper::ProfileZone aZone("lo_getGlobalClipboard");
+
+    SolarMutexGuard aGuard;
+    SetLastExceptionMsg();
+
+    assert (pOutCount);
+    assert (pOutMimeTypes);
+    assert (pOutSizes);
+    assert (pOutStreams);
+
+    *pOutCount = 0;
+    *pOutMimeTypes = nullptr;
+    *pOutSizes = nullptr;
+    *pOutStreams = nullptr;
+
+    return fetchClipboardContents(pMimeTypes, pOutCount, pOutMimeTypes, pOutSizes, pOutStreams);
+}
+
 static int doc_setClipboard(COKitDocument* pThis,
                             const size_t   nInCount,
                             const char   **pInMimeTypes,
@@ -6618,20 +6770,27 @@ static int doc_setClipboard(COKitDocument* pThis,
     return true;
 }
 
-static void doc_installClipboardProvider(COKitDocument* pThis,
-                                         const COKitClipboardProvider* pProvider)
+// Office-level: install one process-global provider and switch the kit to a
+// single shared clipboard for every view and document (the desktop app).
+static void lo_installClipboardProvider(COKit* /*pThis*/, const COKitClipboardProvider* pProvider)
 {
     SolarMutexGuard aGuard;
     SetLastExceptionMsg();
 
-    // The provider does synchronous platform clipboard input and output during a
-    // copy or paste. That is only safe where the document work runs on the app's
-    // own (main) thread, i.e. the in-process unipoll apps; the out-of-process
-    // server has no local clipboard and keeps the plain get/setClipboard path.
-    if (!vcl::kit::isUnipoll())
-        return;
+    KitClipboardFactory::installGlobalProvider(pProvider);
+}
 
-    forceSetClipboardForCurrentView(pThis)->setProvider(pProvider);
+// Renders the shared clipboard's formats now, so its contents survive the close
+// of the document that produced them. Operates on the process-global shared
+// clipboard, so the document argument only serves to reach this call.
+static void doc_flushClipboard(COKitDocument* /*pThis*/)
+{
+    comphelper::ProfileZone aZone("doc_flushClipboard");
+
+    SolarMutexGuard aGuard;
+    SetLastExceptionMsg();
+
+    KitClipboardFactory::flushSharedClipboard();
 }
 
 // See COKit's Document::transferClipboardFromView(); the caller must have
@@ -8239,7 +8398,10 @@ static void doc_setColorPreviewState(SAL_UNUSED_PARAMETER COKitDocument* /*pThis
 
 static void lo_executeScript(
     char const * script, char ** result, char ** error,
-    void (*proxyCallback) (void * data, char const * payload), void * proxyCallbackData) {
+    void (*proxyCallback) (void * data, char const * payload), void * proxyCallbackData,
+    bool * usedLegacyUnoApi)
+{
+    assert(usedLegacyUnoApi != nullptr);
     comphelper::ProfileZone zone("lo_executeScript");
     SolarMutexGuard guard;
     SetLastExceptionMsg();
@@ -8254,7 +8416,8 @@ static void lo_executeScript(
         };
     }
     try {
-        OUString value = jsuno::execute(OUString::fromUtf8(script), std::move(hook));
+        OUString value = jsuno::execute(
+            OUString::fromUtf8(script), std::move(hook), usedLegacyUnoApi);
         if (!value.isEmpty()) {
             *result = convertOUString(value);
         }
@@ -8266,6 +8429,7 @@ static void lo_executeScript(
     (void) script;
     (void) proxyCallback;
     (void) proxyCallbackData;
+    (void) usedLegacyUnoApi;
     static constexpr auto msg = u"executeScript: QuickJS support is not enabled in this build"_ustr;
     SetLastExceptionMsg(msg);
     *error = convertOUString(msg);
@@ -8297,6 +8461,11 @@ static void lo_cancelProxyCalls()
 static int lo_isExpectedReentry()
 {
     return vcl::kit::isExpectedReentry() ? 1 : 0;
+}
+
+static bool lo_takeLegacyUnoApiUseFlag()
+{
+    return comphelper::takeLegacyUnoApiUseFlag();
 }
 
 static char* lo_getError (COKit *pThis)

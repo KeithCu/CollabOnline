@@ -54,10 +54,7 @@ namespace com::sun::star::geometry
 namespace com::sun::star::rendering
 {
     class  XBitmap;
-    class  XIntegerReadOnlyBitmap;
 }
-
-namespace com::sun::star::rendering { class XColorSpace; }
 
 namespace vcl::unotools
 {
@@ -71,7 +68,7 @@ namespace vcl::unotools
 
         /** Create a Bitmap from an XBitmap
          */
-        ::Bitmap VCL_DLLPUBLIC bitmapFromXBitmap( const css::uno::Reference< css::rendering::XIntegerReadOnlyBitmap >& xInputBitmap );
+        ::Bitmap VCL_DLLPUBLIC bitmapFromXBitmap( const css::uno::Reference< css::rendering::XBitmap >& xInputBitmap );
 
         // Color conversions (vcl/tools Color <-> canvas standard color space)
 
@@ -88,13 +85,9 @@ namespace vcl::unotools
 
             @param rColor
             Color to convert
-
-            @param xColorSpace
-            Color space to convert into
          */
         cpo::uno::Sequence< double >
-        VCL_DLLPUBLIC colorToDoubleSequence( const Color&                                              rColor,
-                                             const css::uno::Reference< css::rendering::XColorSpace >& xColorSpace );
+        VCL_DLLPUBLIC colorToDoubleSequence( const Color& rColor );
 
         /** Convert from standard device color space to VCL/Tools color
 
@@ -108,12 +101,8 @@ namespace vcl::unotools
 
             @param rColor
             Color sequence to convert from
-
-            @param xColorSpace
-            Color space to convert from
          */
-        Color VCL_DLLPUBLIC doubleSequenceToColor( const cpo::uno::Sequence< double >& rColor,
-                                                   const css::uno::Reference< css::rendering::XColorSpace >& xColorSpace );
+        Color VCL_DLLPUBLIC doubleSequenceToColor( const cpo::uno::Sequence< double >& rColor );
 
         /// Convert [0,1] double value to [0,255] int
         inline sal_Int8 toByteColor( double val )
@@ -127,9 +116,6 @@ namespace vcl::unotools
         {
             return val / 255.0;
         }
-
-        /// Create a standard color space suitable for VCL RGB color
-        css::uno::Reference< css::rendering::XColorSpace> VCL_DLLPUBLIC createStandardColorSpace();
 
         // Geometry conversions (vcl/tools <-> x)
 

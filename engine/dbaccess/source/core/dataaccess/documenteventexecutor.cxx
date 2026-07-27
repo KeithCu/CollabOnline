@@ -41,7 +41,7 @@ namespace dbaccess
     using ::com::sun::star::uno::Exception;
     using ::com::sun::star::uno::RuntimeException;
     using ::cpo::uno::Sequence;
-    using ::com::sun::star::uno::WeakReference;
+    using ::cpo::uno::WeakReference;
     using ::com::sun::star::uno::XComponentContext;
     using ::com::sun::star::document::XDocumentEventBroadcaster;
     using ::com::sun::star::document::XEventsSupplier;
@@ -126,7 +126,7 @@ namespace dbaccess
     {
     }
 
-    void SAL_CALL DocumentEventExecutor::documentEventOccured( const DocumentEvent& Event )
+    void DocumentEventExecutor::documentEventOccured( const DocumentEvent& Event )
     {
         rtl::Reference< ODatabaseDocument > xDocument( mxDocument.get() );
         if ( !xDocument )
@@ -176,7 +176,7 @@ namespace dbaccess
         }
     }
 
-    void SAL_CALL DocumentEventExecutor::disposing( const lang::EventObject& /*_Source*/ )
+    void DocumentEventExecutor::disposing( const lang::EventObject& /*_Source*/ )
     {
         // not interested in
     }

@@ -24,9 +24,9 @@ $(eval $(call gb_Library_set_include,vclcanvas,\
     -I$(SRCDIR)/canvas/inc \
 ))
 
-$(eval $(call gb_Library_set_precompiled_header,vclcanvas,canvas/inc/pch/precompiled_vclcanvas))
+$(eval $(call gb_Library_set_componentfile,vclcanvas,canvas/source/factory/canvasfactory,services))
 
-$(eval $(call gb_Library_set_componentfile,vclcanvas,canvas/source/vcl/vclcanvas,services))
+$(eval $(call gb_Library_set_precompiled_header,vclcanvas,canvas/inc/pch/precompiled_vclcanvas))
 
 $(eval $(call gb_Library_use_external,vclcanvas,boost_headers))
 
@@ -47,24 +47,18 @@ $(eval $(call gb_Library_use_libraries,vclcanvas,\
 ))
 
 $(eval $(call gb_Library_add_exception_objects,vclcanvas,\
-	canvas/source/vcl/backbuffer \
+	canvas/source/factory/cf_service \
 	canvas/source/vcl/bitmapbackbuffer \
 	canvas/source/vcl/cachedbitmap \
 	canvas/source/vcl/canvas \
 	canvas/source/vcl/canvasbitmap \
 	canvas/source/vcl/canvasbitmaphelper \
-	canvas/source/vcl/canvascustomsprite \
 	canvas/source/vcl/canvasfont \
 	canvas/source/vcl/canvashelper \
 	canvas/source/vcl/devicehelper \
 	canvas/source/vcl/impltools \
-	canvas/source/vcl/spritecanvas \
-	canvas/source/vcl/spritecanvashelper \
-	canvas/source/vcl/spritedevicehelper \
-	canvas/source/vcl/spritehelper \
 	canvas/source/vcl/textlayout \
 	canvas/source/vcl/canvashelper_texturefill \
-	canvas/source/vcl/windowoutdevholder \
 ))
 
 # vim: set noet sw=4 ts=4:

@@ -39,7 +39,7 @@
 #include <com/sun/star/awt/DeviceCapability.hpp>
 #include <com/sun/star/awt/XWindow.hpp>
 #include <com/sun/star/rendering/CanvasFactory.hpp>
-#include <com/sun/star/rendering/XSpriteCanvas.hpp>
+#include <com/sun/star/rendering/XCanvas.hpp>
 
 #ifdef DISABLE_DYNLOADING
 // Linking all needed LO code into one .so/executable, these already
@@ -238,15 +238,6 @@ OUString OutputDevice::GetRenderBackendName() const
     assert(mpGraphics);
 
     return mpGraphics->getRenderBackendName();
-}
-
-cpo::uno::Any OutputDevice::GetSystemGfxDataAny() const
-{
-    const SystemGraphicsData aSysData = GetSystemGfxData();
-    cpo::uno::Sequence< sal_Int8 > aSeq( reinterpret_cast<sal_Int8 const *>(&aSysData),
-                                                      aSysData.nSize );
-
-    return cpo::uno::Any(aSeq);
 }
 
 void OutputDevice::SetRefPoint()
@@ -651,80 +642,6 @@ css::awt::DeviceInfo OutputDevice::GetDeviceInfo() const
     aInfo.BottomInset = 0;
 
     return aInfo;
-}
-
-Reference< css::rendering::XCanvas > OutputDevice::GetCanvas() const
-{
-    // try to retrieve hard reference from weak member
-    Reference< css::rendering::XCanvas > xCanvas( mxCanvas );
-    // canvas still valid? Then we're done.
-    if( xCanvas.is() )
-        return xCanvas;
-    xCanvas = ImplGetCanvas( false );
-    mxCanvas = xCanvas;
-    return xCanvas;
-}
-
-Reference< css::rendering::XSpriteCanvas > OutputDevice::GetSpriteCanvas() const
-{
-    Reference< css::rendering::XCanvas > xCanvas( mxCanvas );
-    Reference< css::rendering::XSpriteCanvas > xSpriteCanvas( xCanvas, UNO_QUERY );
-    if( xSpriteCanvas.is() )
-        return xSpriteCanvas;
-    xCanvas = ImplGetCanvas( true );
-    mxCanvas = xCanvas;
-    return Reference< css::rendering::XSpriteCanvas >( xCanvas, UNO_QUERY );
-}
-
-// Generic implementation, Window will override.
-css::uno::Reference< css::rendering::XCanvas > OutputDevice::ImplGetCanvas( bool bSpriteCanvas ) const
-{
-    /* Arguments:
-       0: ptr to creating instance (Window or VirtualDevice)
-       1: current bounds of creating instance
-       2: bool, denoting always on top state for Window (always false for VirtualDevice)
-       3: XWindow for creating Window (or empty for VirtualDevice)
-       4: SystemGraphicsData as a streamed Any
-     */
-    Sequence< Any > aArg{
-        Any(reinterpret_cast<sal_Int64>(this)),
-        Any(css::awt::Rectangle( mnOutOffX, mnOutOffY, mnOutWidth, mnOutHeight )),
-        Any(false),
-        Any(Reference< css::awt::XWindow >()),
-        GetSystemGfxDataAny()
-    };
-
-    const Reference< XComponentContext >& xContext = comphelper::getProcessComponentContext();
-
-    static tools::DeleteUnoReferenceOnDeinit<css::lang::XMultiComponentFactory> xStaticCanvasFactory(
-        css::rendering::CanvasFactory::create( xContext ) );
-    Reference<css::lang::XMultiComponentFactory> xCanvasFactory(xStaticCanvasFactory.get());
-    Reference< css::rendering::XCanvas > xCanvas;
-
-    if(xCanvasFactory.is())
-    {
-        xCanvas.set( xCanvasFactory->createInstanceWithArgumentsAndContext(
-                         bSpriteCanvas ?
-                         u"com.sun.star.rendering.SpriteCanvas"_ustr :
-                         u"com.sun.star.rendering.Canvas"_ustr,
-                         aArg,
-                         xContext ),
-                     UNO_QUERY );
-    }
-
-    // no factory??? Empty reference, then.
-    return xCanvas;
-}
-
-void OutputDevice::ImplDisposeCanvas()
-{
-    css::uno::Reference< css::rendering::XCanvas > xCanvas( mxCanvas );
-    if( xCanvas.is() )
-    {
-        css::uno::Reference< css::lang::XComponent >  xCanvasComponent( xCanvas, css::uno::UNO_QUERY );
-        if( xCanvasComponent.is() )
-            xCanvasComponent->dispose();
-    }
 }
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab cinoptions=b1,g0,N-s cinkeys+=0=break: */

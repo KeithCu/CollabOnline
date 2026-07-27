@@ -275,6 +275,7 @@ $(eval $(call gb_UnoApi_add_idlfiles_nohdl,offapi,com/sun/star/rendering,\
 	Canvas \
 	CanvasFactory \
 	MtfRenderer \
+	XCanvasFactory \
 ))
 $(eval $(call gb_UnoApi_add_idlfiles_nohdl,offapi,com/sun/star/resource,\
 	StringResource \
@@ -962,9 +963,6 @@ $(eval $(call gb_UnoApi_add_idlfiles_noheader,offapi,com/sun/star/presentation/t
 	Footer \
 	Header \
 ))
-$(eval $(call gb_UnoApi_add_idlfiles_noheader,offapi,com/sun/star/rendering,\
-	BitmapCanvas \
-))
 $(eval $(call gb_UnoApi_add_idlfiles_noheader,offapi,com/sun/star/script/browse,\
 	BrowseNode \
 	BrowseNodeFactory \
@@ -991,12 +989,7 @@ $(eval $(call gb_UnoApi_add_idlfiles_noheader,offapi,com/sun/star/sdb,\
 	DataSettings \
 	DataSource \
 	DataSourceBrowser \
-	DatabaseAccess \
-	DatabaseAccessConnection \
-	DatabaseAccessContext \
-	DatabaseAccessDataSource \
 	DatabaseDocument \
-	DatabaseEnvironment \
 	DatasourceAdministrationDialog \
 	DefinitionContainer \
 	DefinitionContent \
@@ -1398,7 +1391,6 @@ $(eval $(call gb_UnoApi_add_idlfiles_noheader,offapi,com/sun/star/ucb,\
 	ContentProvider \
 	ContentProviderProxy \
 	ContentResultSet \
-	ContentTransmitter \
 	DefaultHierarchyDataSource \
 	DynamicResultSet \
 	ExpandContentProvider \
@@ -2537,8 +2529,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/gallery,\
 $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/geometry,\
 	AffineMatrix2D \
 	AffineMatrix3D \
-	EllipticalArc \
-	IntegerBezierSegment2D \
 	IntegerPoint2D \
 	IntegerRectangle2D \
 	IntegerSize2D \
@@ -2548,7 +2538,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/geometry,\
 	RealRectangle2D \
 	RealRectangle3D \
 	RealSize2D \
-	XMapping2D \
 ))
 $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/graphic,\
 	GraphicColorMode \
@@ -2694,7 +2683,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/linguistic2,\
 	XConversionDictionaryList \
 	XConversionPropertyType \
 	XDictionary \
-	XDictionary1 \
 	XDictionaryEntry \
 	XDictionaryEventListener \
 	XDictionaryList \
@@ -2817,6 +2805,7 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/presentation,\
 	XSlideShowListener \
     XSlideShowNavigationListener \
 	XSlideShowView \
+	XSoundReference \
 	XTransition \
 	XTransitionFactory \
 ))
@@ -2846,24 +2835,18 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/rdf,\
 ))
 $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/rendering,\
 	ARGBColor \
-	AnimationAttributes \
-	AnimationRepeat \
 	BlendMode \
 	Caret \
 	Color \
 	ColorComponent \
 	ColorComponentTag \
 	ColorProfile \
-	ColorSpaceType \
 	CompositeOperation \
 	EmphasisMark \
 	FillRule \
-	FloatingPointBitmapFormat \
-	FloatingPointBitmapLayout \
 	FontInfo \
 	FontMetrics \
 	FontRequest \
-	IntegerBitmapLayout \
 	InterpolationMode \
 	Panose \
 	PanoseArmStyle \
@@ -2880,46 +2863,25 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/rendering,\
 	PathJoinType \
 	RGBColor \
 	RenderState \
-	RenderingIntent \
 	RepaintResult \
 	StringContext \
 	StrokeAttributes \
 	TextDirection \
-	TextHit \
 	Texture \
 	TexturingMode \
 	ViewState \
 	VolatileContentDestroyedException \
-	XAnimatedSprite \
-	XAnimation \
 	XBezierPolyPolygon2D \
 	XBitmap \
-	XBitmapCanvas \
-	XBitmapPalette \
-	XBufferController \
 	XCachedPrimitive \
 	XCanvas \
 	XCanvasFont \
-	XColorSpace \
-	XCustomSprite \
 	XGraphicDevice \
-	XHalfFloatBitmap \
-	XHalfFloatReadOnlyBitmap \
-	XIeeeDoubleBitmap \
-	XIeeeDoubleReadOnlyBitmap \
-	XIeeeFloatBitmap \
-	XIeeeFloatReadOnlyBitmap \
-	XIntegerBitmap \
-	XIntegerBitmapColorSpace \
-	XIntegerReadOnlyBitmap \
 	XLinePolyPolygon2D \
 	XMtfRenderer \
 	XParametricPolyPolygon2D \
 	XPolyPolygon2D \
-	XSprite \
-	XSpriteCanvas \
 	XTextLayout \
-	XVolatileBitmap \
 ))
 $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/resource,\
 	MissingResourceException \
@@ -3002,10 +2964,7 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/sdb,\
 	XCompletedConnection \
 	XCompletedExecution \
 	XDataAccessDescriptorFactory \
-	XDatabaseAccess \
-	XDatabaseAccessListener \
 	XDatabaseContext \
-	XDatabaseEnvironment \
 	XDatabaseRegistrations \
 	XDatabaseRegistrationsListener \
 	XDocumentDataSource \
@@ -3064,8 +3023,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/sdbc,\
 	BatchUpdateException \
 	BestRowScope \
 	BestRowType \
-	ChangeAction \
-	ChangeEvent \
 	ColumnSearch \
 	ColumnType \
 	ColumnValue \
@@ -3331,7 +3288,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/sheet,\
 	XExternalDocLinks \
 	XExternalSheetCache \
 	XExternalSheetName \
-	XFillAcrossSheet \
 	XFilterFormulaParser \
 	XFormulaOpCodeMapper \
 	XFormulaParser \
@@ -3388,7 +3344,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/sheet,\
 	XSheetOperation \
 	XSheetOutline \
 	XSheetPageBreak \
-	XSheetPastable \
 	XSolver \
 	XSolverDescription \
 	XSolverSettings \
@@ -3405,7 +3360,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/sheet,\
 	XUsedAreaCursor \
 	XViewFreezable \
 	XViewPane \
-	XViewPanesSupplier \
 	XViewSplitable \
 	XVolatileResult \
 ))
@@ -3444,7 +3398,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/style,\
 	XStyleSupplier \
 ))
 $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/svg,\
-	XSVGPrinter \
 	XSVGWriter \
 ))
 $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/system,\
@@ -3734,7 +3687,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/ucb,\
 	InteractiveAppException \
 	InteractiveAugmentedIOException \
 	InteractiveBadTransferURLException \
-	InteractiveFileIOException \
 	InteractiveIOException \
 	InteractiveLockingException \
 	InteractiveLockingLockExpiredException \
@@ -3828,7 +3780,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/ucb,\
 	XContentProviderFactory \
 	XContentProviderManager \
 	XContentProviderSupplier \
-	XContentTransmitter \
 	XDataContainer \
 	XDynamicResultSet \
 	XDynamicResultSetListener \
@@ -4016,7 +3967,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/util,\
 	XIndent \
 	XJobManager \
 	XLinkUpdate \
-	XLocalizedAliases \
 	XLockable \
 	XMergeable \
 	XModeChangeApproveListener \

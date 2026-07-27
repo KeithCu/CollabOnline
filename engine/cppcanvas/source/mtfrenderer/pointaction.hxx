@@ -20,16 +20,16 @@
 #pragma once
 
 #include <action.hxx>
-#include <cppcanvas/canvas.hxx>
+#include <canvas.hxx>
 
 class Color;
 namespace basegfx {
     class B2DPoint;
 }
 
-/* Definition of internal::PointActionFactory */
+/* Definition of PointActionFactory */
 
-namespace cppcanvas::internal
+namespace cppcanvas
     {
         struct OutDevState;
 

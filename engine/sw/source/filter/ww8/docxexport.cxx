@@ -233,6 +233,25 @@ void DocxExport::AppendBookmark( const OUString& rName )
     m_pAttrOutput->WriteBookmarks_Impl( aStarts, aEnds );
 }
 
+void DocxExport::AppendBookmarkStart(const OUString& rName)
+{
+    std::vector<OUString> aStarts{ rName };
+    std::vector<OUString> aEnds{};
+
+    m_pAttrOutput->WriteBookmarks_Impl(aStarts, aEnds);
+}
+
+void DocxExport::AppendBookmarkEnd(const OUString& rName, bool bIsFinal)
+{
+    std::vector<OUString> aStarts{};
+    std::vector<OUString> aEnds{ rName };
+
+    if (bIsFinal)
+        m_pAttrOutput->WriteFinalBookmarks_Impl(aStarts, aEnds);
+    else
+        m_pAttrOutput->WriteBookmarks_Impl(aStarts, aEnds);
+}
+
 void DocxExport::AppendAnnotationMarks( const SwWW8AttrIter& rAttrs, sal_Int32 nCurrentPos, sal_Int32 nLen )
 {
     std::vector< SwMarkName > aStarts;
@@ -1167,6 +1186,8 @@ void DocxExport::WriteDocVars(const sax_fastparser::FSHelperPtr& pFS)
 static auto
 WriteCompat(SwDoc const& rDoc, ::sax_fastparser::FSHelperPtr const& rpFS) -> void
 {
+    // NOTE: officeotron complains if these are placed in the 'wrong order'
+
     const IDocumentSettingAccess& rIDSA = rDoc.getIDocumentSettingAccess();
     if (!rIDSA.get(DocumentSettingId::ADD_EXT_LEADING))
     {
@@ -1191,6 +1212,8 @@ WriteCompat(SwDoc const& rDoc, ::sax_fastparser::FSHelperPtr const& rpFS) -> voi
     {
         rpFS->singleElementNS(XML_w, XML_adjustLineHeightInTable);
     }
+    if (rIDSA.get(DocumentSettingId::PARA_SPACE_MAX))
+        rpFS->singleElementNS(XML_w, XML_doNotUseHTMLParagraphAutoSpacing);
     if (rIDSA.get(DocumentSettingId::DO_NOT_BREAK_WRAPPED_TABLES))
     {
         // Map the DoNotBreakWrappedTables compat flag to <w:doNotBreakWrappedTables>.

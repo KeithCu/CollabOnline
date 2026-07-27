@@ -22,7 +22,8 @@ import java.util.HashMap;
 
 import com.sun.star.lib.uno.typedesc.TypeDescription;
 import com.sun.star.uno.Any;
-import com.sun.star.uno.TypeClass;
+import com.sun.star.uno.Enum;
+import cpo.uno.TypeClass;
 import com.sun.star.uno.XInterface;
 
 /**

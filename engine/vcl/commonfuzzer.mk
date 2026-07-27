@@ -136,8 +136,6 @@ fuzzer_core_libraries = \
     ucptdoc1 \
     srtrs1 \
     storagefd \
-    mtfrenderer \
-    canvasfactory \
     vclcanvas \
     pdfimport \
     xof \

@@ -69,6 +69,7 @@ namespace sd {
 class DrawDocShell;
 class DrawViewShell;
 class SlideshowLayerRenderer;
+class SlideShow;
 }
 
 extern OUString getPageApiName( SdPage const * pPage );
@@ -99,6 +100,20 @@ public:
     /// Cache of graphics from vector rendering, keyed by checksum.
     std::unordered_map<sal_Int64, Graphic>& getBitmapCache() { return maBitmapCache; }
 
+    /// Content version of a vector-rendering part (0-based slide index),
+    /// counted up each time an object on that part changes. A part that
+    /// has not changed since the document was opened reports 0.
+    sal_uInt64 getVectorPartVersion(sal_Int32 nPart) const;
+
+    /// True when the object with the given unique id last changed on the
+    /// part at a version later than nSince.
+    bool isVectorObjectChangedSince(sal_Int32 nPart, sal_uInt64 nObjectId,
+                                    sal_uInt64 nSince) const;
+
+    /// True when the part's master page last changed at a version later
+    /// than nSince.
+    bool isVectorMasterChangedSince(sal_Int32 nPart, sal_uInt64 nSince) const;
+
 private:
     ::sd::DrawDocShell* mpDocShell;
     SdDrawDocument* mpDoc;
@@ -106,6 +121,24 @@ private:
 
     std::unique_ptr<sd::SlideshowLayerRenderer> mpSlideshowLayerRenderer;
     std::unordered_map<sal_Int64, Graphic> maBitmapCache;
+
+    /// Content state of one vector-rendering part: its current version,
+    /// the version at which its master page last changed, and, per object
+    /// unique id, the version at which that object last changed.
+    struct VectorPartState
+    {
+        sal_uInt64 mnVersion = 0;
+        sal_uInt64 mnMasterChangeVersion = 0;
+        std::unordered_map<sal_uInt64, sal_uInt64> maObjectChangeVersions;
+    };
+    /// Vector content state, keyed by 0-based slide index.
+    std::unordered_map<sal_Int32, VectorPartState> maVectorParts;
+
+    /// Last vector-primitives version pushed to each view, keyed by view
+    /// id then 0-based slide index. A push computes its delta since this
+    /// and then advances it.
+    std::unordered_map<sal_Int32, std::unordered_map<sal_Int32, sal_uInt64>>
+        maVectorPushedVersions;
 
     css::uno::Reference<css::uno::XInterface> create(
         OUString const & aServiceSpecifier, OUString const & referer);
@@ -242,6 +275,8 @@ public:
     virtual sal_Int32 SAL_CALL getRendererCount( const cpo::uno::Any& aSelection, const cpo::uno::Sequence< css::beans::PropertyValue >& xOptions ) override;
     virtual cpo::uno::Sequence< css::beans::PropertyValue > SAL_CALL getRenderer( sal_Int32 nRenderer, const cpo::uno::Any& aSelection, const cpo::uno::Sequence< css::beans::PropertyValue >& xOptions ) override;
     virtual void SAL_CALL render( sal_Int32 nRenderer, const cpo::uno::Any& aSelection, const cpo::uno::Sequence< css::beans::PropertyValue >& xOptions ) override;
+
+    rtl::Reference< sd::SlideShow > getSlideShow();
 
     // ITiledRenderable
     SD_DLLPUBLIC virtual void paintTile( VirtualDevice& rDevice,

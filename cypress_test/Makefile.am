@@ -12,6 +12,9 @@ MAINTAINERCLEANFILES = Makefile.in
 
 export NODE_PATH=$(abs_builddir)/node_modules
 
+# drop the inherited malformed value, there is no session bus to reach here
+unexport DBUS_SESSION_BUS_ADDRESS
+
 V = $(if $(verbose),,@)
 abs_dir = $(if $(filter $(abs_builddir),$(abs_srcdir)),.,$(abs_srcdir))
 CYPRESS_BINARY = $(abs_builddir)/node_modules/cypress/bin/cypress
@@ -33,7 +36,7 @@ BUFFERED_SCRIPT = $(abs_srcdir)/run_buffered.sh
 # Render the browser UI with DejaVu Sans on every host, so jsdialogs drawn
 # as HTML match the pixel baselines regardless of the distribution's default
 # sans font. Only affect the cypress process, so it does not reach the kit.
-CYPRESS_FONTCONFIG = FONTCONFIG_FILE=$(abs_srcdir)/fontconfig/cypress-fonts.conf
+CYPRESS_FONTCONFIG = FONTCONFIG_FILE=$(abs_builddir)/fontconfig/cypress-fonts.conf
 
 PID_FILE=$(abs_builddir)/workdir/coolwsd.pid
 ERROR_LOG=$(abs_builddir)/workdir/error.log
@@ -140,9 +143,17 @@ check-local: do-check
 	$(if $(wildcard $(ERROR_LOG)),$(error CypressError: some tests failed!))
 
 # TODO: enable multiuser tests $(MULTIUSER_TESTS_DONE)
-do-check: $(DESKTOP_TEST_FILES_DONE) $(MOBILE_TEST_FILES_DONE) $(IDLE_TEST_FILES_DONE)
+# The idle suite kills the shared coolwsd and starts its own short-idle one, and
+# re-resets the shared test/data/presets, so it must not run at the same time as
+# the desktop and mobile suites:
+do-check: $(DESKTOP_TEST_FILES_DONE) $(MOBILE_TEST_FILES_DONE)
 	$(V)$(KILL_COMMAND) || true
-	$(if $(wildcard $(ERROR_LOG)),$(V)cat $(ERROR_LOG))
+	$(V)rm -f $(ERROR_LOG).prev
+	$(V)test ! -f $(ERROR_LOG) || mv $(ERROR_LOG) $(ERROR_LOG).prev
+	trap '$(KILL_COMMAND)' EXIT && $(MAKE) $(IDLE_TEST_FILES_DONE)
+	$(V)test ! -f $(ERROR_LOG).prev || cat $(ERROR_LOG).prev >> $(ERROR_LOG)
+	$(V)rm -f $(ERROR_LOG).prev
+	$(V)test ! -f $(ERROR_LOG) || cat $(ERROR_LOG)
 
 $(PID_FILE): @JAILS_PATH@ @CACHE_PATH@ $(NODE_BINS)
 	$(call cleanup_before_run)
@@ -196,7 +207,7 @@ $(MULTIUSER_TEST_FILES_DONE): $(PID_FILE)
 		$(V)$(foreach done_file,$(MULTIUSER_TEST_FILES_DONE),mkdir -p $(dir $(done_file)) && touch $(done_file) &&) true\
 	)
 
-$(IDLE_TEST_FILES_DONE): start_short_idle_coolwsd $(PID_FILE)
+$(IDLE_TEST_FILES_DONE): start_short_idle_coolwsd
 	$(if $(PARALLEL_BUILD),\
 		$(call run_idle_tests,$(subst $(IDLE_TRACK_FOLDER)/,,$(basename $@)),$(basename $@).log),\
 		$(call run_idle_tests))
@@ -446,8 +457,10 @@ run-desktop: @JAILS_PATH@ @CACHE_PATH@ $(NODE_BINS)
 	$(call cleanup_before_run)
 	$(call run_JS_error_check)
 	$(call start_coolwsd)
-	$(call run_interactive_desktop,$(spec)) || true
-	$(V)$(KILL_COMMAND) || true
+	$(eval CYPRESS_INCLUDE_TAGS=$(DESKTOP_INCLUDE_TAGS))
+	$(eval export CYPRESS_INCLUDE_TAGS)
+	$(if $(spec),$(call check_spec_existence,$(spec),desktop))
+	$(V)trap '$(KILL_COMMAND) || true' INT TERM EXIT; $(if $(spec),DEBUG='cypress:*' $(CYPRESS_BINARY) run --browser $(BROWSER) --headed --no-exit --config-file $(CYPRESS_CONFIG) --config $(DESKTOP_CONFIG)$(COMMA)retries=0 --env $(DESKTOP_ENV) --spec=$(DESKTOP_TEST_FOLDER)/$(spec),DEBUG='cypress:*' $(CYPRESS_BINARY) open --config-file $(CYPRESS_CONFIG) --config $(DESKTOP_CONFIG) --env $(DESKTOP_ENV)) || true
 
 DESKTOP_CONFIG = \
 	specPattern=$(DESKTOP_TEST_FOLDER)/**/*_spec.js,supportFile=$(SUPPORT_FILE),userAgent=$(DESKTOP_USER_AGENT)

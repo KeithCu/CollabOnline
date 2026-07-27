@@ -278,7 +278,11 @@ namespace
         if (o3tl::make_unsigned(nWidthBytes) < nMinStride)
             return Bitmap();
 
-        std::vector<sal_uInt8> aBits(o3tl::make_unsigned(nWidthBytes) * o3tl::make_unsigned(nHeight), 0);
+        const sal_uInt64 nBitsSize = o3tl::make_unsigned(nWidthBytes) * o3tl::make_unsigned(nHeight);
+        if (nBitsSize > rStream.remainingSize())
+            return Bitmap();
+
+        std::vector<sal_uInt8> aBits(nBitsSize, 0);
         if (rStream.ReadBytes(aBits.data(), aBits.size()) != aBits.size())
             return Bitmap();
 
@@ -1108,11 +1112,11 @@ namespace emfio
                 if (nRecordSize != 2u * nNumberOfEntries + 5u)
                     bRecordOk = false;
                 SAL_INFO("emfio", "\t\t Start 0x" << std::hex << nStart << std::dec << ", Number of entries: " << nNumberOfEntries);
-                sal_uInt32 nPalleteEntry;
                 std::vector< Color > aPaletteColors;
-                for (sal_uInt16 i = 0; i < nNumberOfEntries; ++i)
+                for (sal_uInt16 i = 0; i < nNumberOfEntries && mpInputStream->good(); ++i)
                 {
                     //PALETTEENTRY: Values, Blue, Green, Red
+                    sal_uInt32 nPalleteEntry(0);
                     mpInputStream->ReadUInt32( nPalleteEntry );
                     SAL_INFO("emfio", "\t\t " << i << ". Palette entry: " << std::setw(10) << std::showbase <<std::hex << nPalleteEntry << std::dec );
                     aPaletteColors.emplace_back(static_cast<sal_uInt8>(nPalleteEntry), static_cast<sal_uInt8>(nPalleteEntry >> 8), static_cast<sal_uInt8>(nPalleteEntry >> 16));

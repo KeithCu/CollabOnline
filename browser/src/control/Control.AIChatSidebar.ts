@@ -88,19 +88,19 @@ namespace cool {
 		private readonly PROMPT_CARDS: { label: string; prompt: string }[] = [
 			{
 				label: _('Make the following text more concise'),
-				prompt: 'Make it more concise',
+				prompt: _('Make it more concise'),
 			},
 			{
 				label: _('Summarize the key points of this text'),
-				prompt: 'Summarize this text',
+				prompt: _('Summarize this text'),
 			},
 			{
 				label: _('Expand and add more detail to this text'),
-				prompt: 'Expand this text',
+				prompt: _('Expand this text'),
 			},
 			{
 				label: _('Fix grammar, spelling, and punctuation errors'),
-				prompt: 'Fix grammar & spelling',
+				prompt: _('Fix grammar & spelling'),
 			},
 		];
 
@@ -347,19 +347,25 @@ namespace cool {
 			}
 		}
 
-		private static readonly RATING_LABELS: Record<string, string> = {
-			A: 'Best',
-			B: 'Good',
-			C: 'Poor',
-			U: 'Unknown',
-		};
+		private static ratingLabel(letter: string): string {
+			switch (letter) {
+				case 'A':
+					return _('Best');
+				case 'B':
+					return _('Good');
+				case 'C':
+					return _('Poor');
+				default:
+					return _('Unknown');
+			}
+		}
 
 		private applyRatingBadge(): void {
 			const badge = document.getElementById('aichat-rating-badge');
 			if (!badge) return;
 			const letter = app.map.aiEthicalRating || 'U';
 			badge.setAttribute('data-rating', letter);
-			const label = _(AIChatSidebar.RATING_LABELS[letter] || 'Unknown');
+			const label = AIChatSidebar.ratingLabel(letter);
 			const aria = _(
 				'Ethical AI rating: {0} ({1}). Based on open-source licensing, self-hosting, and training data.',
 			)
@@ -408,14 +414,24 @@ namespace cool {
 		}
 
 		private appendMessage(msg: ChatMessage, index: number): void {
-			const messagesList = document.getElementById('aichat-messages-list');
-			if (!messagesList) {
-				this.updateMessagesArea();
-				return;
-			}
-			this.builder.build(messagesList, [this.getMessageJSON(msg, index)], true);
-			this.applyStyleForMessage(index);
-			this.scrollToBottom();
+			// Full rebuilds of the messages area run as queued layouting
+			// tasks. Appending through the same queue keeps this message
+			// ordered after a rebuild that is still pending, even when the
+			// server answers within milliseconds.
+			app.layoutingService.appendLayoutingTask(() => {
+				const messagesList = document.getElementById('aichat-messages-list');
+				if (!messagesList) {
+					this.updateMessagesArea();
+					return;
+				}
+				this.builder.build(
+					messagesList,
+					[this.getMessageJSON(msg, index)],
+					true,
+				);
+				this.applyStyleForMessage(index);
+				this.scrollToBottom();
+			});
 		}
 
 		private updateLoadingDots(): void {

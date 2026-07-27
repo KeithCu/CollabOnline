@@ -152,6 +152,7 @@ public:
     bool getStopAudio() const;
     void setStopAudio();
     void createAudio( const cpo::uno::Any& rSource );
+    void setAudioSource( const cpo::uno::Any& rSource );
     void removeAudio();
     const css::uno::Reference< css::animations::XAudio >& getAudio() const { return mxAudio; }
 
@@ -368,7 +369,7 @@ private:
 typedef std::shared_ptr< InteractiveSequence > InteractiveSequencePtr;
 typedef std::vector< InteractiveSequencePtr > InteractiveSequenceVector;
 
-class MainSequence final : public EffectSequenceHelper, public ISequenceListener
+class SAL_DLLPUBLIC_RTTI MainSequence final : public EffectSequenceHelper, public ISequenceListener
 {
     friend class UndoAnimation;
     friend class MainSequenceRebuildGuard;
@@ -379,7 +380,7 @@ public:
     MainSequence( const css::uno::Reference< css::animations::XAnimationNode >& xTimingRootNode );
     virtual ~MainSequence() override;
 
-    virtual css::uno::Reference< css::animations::XAnimationNode > getRootNode() override;
+    SD_DLLPUBLIC virtual css::uno::Reference< css::animations::XAnimationNode > getRootNode() override;
     void reset( const css::uno::Reference< css::animations::XAnimationNode >& xTimingRootNode );
 
     /** this method rebuilds the animation nodes */

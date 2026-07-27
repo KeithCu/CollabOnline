@@ -72,7 +72,7 @@
 #include <com/sun/star/datatransfer/dnd/XDragGestureRecognizer.hpp>
 #include <com/sun/star/datatransfer/dnd/XDropTarget.hpp>
 #include <com/sun/star/rendering/CanvasFactory.hpp>
-#include <com/sun/star/rendering/XSpriteCanvas.hpp>
+#include <com/sun/star/rendering/XCanvas.hpp>
 #include <comphelper/configuration.hxx>
 #include <comphelper/kit.hxx>
 #include <comphelper/processfactory.hxx>
@@ -153,10 +153,6 @@ void Window::dispose()
 
     // remove Key and Mouse events issued by Application::PostKey/MouseEvent
     Application::RemoveMouseAndKeyEvents( this );
-
-    // Dispose of the canvas implementation (which, currently, has an
-    // own wrapper window as a child to this one.
-    GetOutDev()->ImplDisposeCanvas();
 
     mpWindowImpl->mbInDispose = true;
 
@@ -3474,7 +3470,7 @@ void Window::DumpAsPropertyTree(tools::JsonWriter& rJsonWriter)
     if (pAccLabelFor)
     {
         rJsonWriter.put("labelFor", pAccLabelFor->get_id());
-        rJsonWriter.put("labelForType", windowTypeName(pAccLabelFor->GetType()));
+        rJsonWriter.put("labelForType", pAccLabelFor->GetTypeName());
     }
 
     auto aLabelledBy = GetAllAccessibleRelationLabeledBy();
@@ -3810,68 +3806,6 @@ void Window::EnableNativeWidget( bool bEnable )
 bool Window::IsNativeWidgetEnabled() const
 {
     return mpWindowImpl && ImplGetWinData()->mbEnableNativeWidget;
-}
-
-Reference< css::rendering::XCanvas > WindowOutputDevice::ImplGetCanvas( bool bSpriteCanvas ) const
-{
-    // Feed any with operating system's window handle
-
-    // common: first any is VCL pointer to window (for VCL canvas)
-    Sequence< Any > aArg{
-        Any(reinterpret_cast<sal_Int64>(this)),
-        Any(css::awt::Rectangle( mnOutOffX, mnOutOffY, mnOutWidth, mnOutHeight )),
-        Any(mxOwnerWindow->mpWindowImpl->mbAlwaysOnTop),
-        Any(Reference< css::awt::XWindow >(
-                             mxOwnerWindow->GetComponentInterface(),
-                             UNO_QUERY )),
-        GetSystemGfxDataAny()
-    };
-
-    const Reference< XComponentContext >& xContext = comphelper::getProcessComponentContext();
-
-    // Create canvas instance with window handle
-
-    static tools::DeleteUnoReferenceOnDeinit<XMultiComponentFactory> xStaticCanvasFactory(
-        css::rendering::CanvasFactory::create( xContext ) );
-    Reference<XMultiComponentFactory> xCanvasFactory(xStaticCanvasFactory.get());
-    Reference< css::rendering::XCanvas > xCanvas;
-
-    if(xCanvasFactory.is())
-    {
-#ifdef _WIN32
-        // see #140456# - if we're running on a multiscreen setup,
-        // request special, multi-screen safe sprite canvas
-        // implementation (not DX5 canvas, as it cannot cope with
-        // surfaces spanning multiple displays). Note: canvas
-        // (without sprite) stays the same)
-        const sal_uInt32 nDisplay = static_cast< WinSalFrame* >( mxOwnerWindow->mpWindowImpl->mpFrame )->mnDisplay;
-        if( nDisplay >= Application::GetScreenCount() )
-        {
-            xCanvas.set( xCanvasFactory->createInstanceWithArgumentsAndContext(
-                                 bSpriteCanvas ?
-                                 OUString( "com.sun.star.rendering.SpriteCanvas.MultiScreen" ) :
-                                 OUString( "com.sun.star.rendering.Canvas.MultiScreen" ),
-                                 aArg,
-                                 xContext ),
-                             UNO_QUERY );
-
-        }
-        else
-#endif
-        {
-            xCanvas.set( xCanvasFactory->createInstanceWithArgumentsAndContext(
-                             bSpriteCanvas ?
-                             u"com.sun.star.rendering.SpriteCanvas"_ustr :
-                             u"com.sun.star.rendering.Canvas"_ustr,
-                             aArg,
-                             xContext ),
-                         UNO_QUERY );
-
-        }
-    }
-
-    // no factory??? Empty reference, then.
-    return xCanvas;
 }
 
 OUString Window::GetSurroundingText() const

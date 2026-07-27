@@ -17,7 +17,7 @@ namespace comphelper
 WeakComponentImplHelperBase::~WeakComponentImplHelperBase() {}
 
 // css::lang::XComponent
-void SAL_CALL WeakComponentImplHelperBase::dispose()
+void WeakComponentImplHelperBase::dispose()
 {
     std::unique_lock aGuard(m_aMutex);
     if (m_bDisposed)
@@ -48,7 +48,7 @@ void WeakComponentImplHelperBase::disposeOnDestruct()
 
 void WeakComponentImplHelperBase::disposing(std::unique_lock<std::mutex>&) {}
 
-void SAL_CALL WeakComponentImplHelperBase::addEventListener(
+void WeakComponentImplHelperBase::addEventListener(
     css::uno::Reference<css::lang::XEventListener> const& rxListener)
 {
     std::unique_lock aGuard(m_aMutex);
@@ -57,14 +57,14 @@ void SAL_CALL WeakComponentImplHelperBase::addEventListener(
     maEventListeners.addInterface(aGuard, rxListener);
 }
 
-void SAL_CALL WeakComponentImplHelperBase::removeEventListener(
+void WeakComponentImplHelperBase::removeEventListener(
     css::uno::Reference<css::lang::XEventListener> const& rxListener)
 {
     std::unique_lock aGuard(m_aMutex);
     maEventListeners.removeInterface(aGuard, rxListener);
 }
 
-cpo::uno::Any SAL_CALL WeakComponentImplHelperBase::queryInterface(cpo::uno::Type const& rType)
+cpo::uno::Any WeakComponentImplHelperBase::queryInterface(cpo::uno::Type const& rType)
 {
     cpo::uno::Any aReturn = ::cppu::queryInterface(rType, static_cast<css::uno::XWeak*>(this),
                                                    static_cast<css::lang::XComponent*>(this));
@@ -75,7 +75,7 @@ cpo::uno::Any SAL_CALL WeakComponentImplHelperBase::queryInterface(cpo::uno::Typ
 
 static void checkInterface(cpo::uno::Type const& rType)
 {
-    if (css::uno::TypeClass_INTERFACE != rType.getTypeClass())
+    if (cpo::uno::TypeClass_INTERFACE != rType.getTypeClass())
     {
         OUString msg("querying for interface \"" + rType.getTypeName() + "\": no interface type!");
         SAL_WARN("cppuhelper", msg);
@@ -109,12 +109,12 @@ static cppu::type_entry* getTypeEntries(cppu::class_data* cd)
             {
                 cppu::type_entry* pEntry = &pEntries[n];
                 cpo::uno::Type const& rType = (*pEntry->m_type.getCppuType)(nullptr);
-                OSL_ENSURE(rType.getTypeClass() == css::uno::TypeClass_INTERFACE,
+                OSL_ENSURE(rType.getTypeClass() == cpo::uno::TypeClass_INTERFACE,
                            "### wrong helper init: expected interface!");
                 OSL_ENSURE(
                     !isXInterface(rType.getTypeLibType()),
                     "### want to implement XInterface: template argument is XInterface?!?!?!");
-                if (rType.getTypeClass() != css::uno::TypeClass_INTERFACE)
+                if (rType.getTypeClass() != cpo::uno::TypeClass_INTERFACE)
                 {
                     OUString msg("type \"" + rType.getTypeName() + "\" is no interface type!");
                     SAL_WARN("cppuhelper", msg);

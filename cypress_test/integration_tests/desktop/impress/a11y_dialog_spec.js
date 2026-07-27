@@ -76,7 +76,7 @@ describe(['tagdesktop'], 'Accessibility Impress Dialog Tests', { testIsolation: 
                 }
             }
         });
-        cy.cGet('.jsdialog-window:not(.ui-overflow-group-popup)').should('not.exist');
+        cy.cGet('.jsdialog-window:not(.ui-overflow-group-popup):not(.snackbar)').should('not.exist');
 
         a11yHelper.resetState();
 
@@ -242,8 +242,10 @@ describe(['tagdesktop'], 'Accessibility Impress Dialog Tests', { testIsolation: 
 
     it('Graphic dialog', function () {
         helper.typeIntoDocument('{esc}{esc}');
+        helper.processToIdle(win);
         desktopHelper.insertImage();
         cy.cGet('#test-div-shapeHandlesSection').should('exist');
+        helper.processToIdle(win);
         a11yHelper.testDialog(win, '.uno:CompressGraphic');
         // remove the inserted image so subsequent tests can reach the table
         helper.typeIntoDocument('{del}');

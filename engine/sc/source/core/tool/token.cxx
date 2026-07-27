@@ -350,6 +350,9 @@ void ScRawToken::SetExternal( const OUString& rStr, OpCode eCode )
 {
     eOp   = eCode;
     eType = svExternal;
+    // set later when a call's arguments are parsed
+    sbyte.cByte = 0;
+    sbyte.eInForceArray = ParamClass::Unknown;
     maExternalName = rStr;
 }
 
@@ -936,7 +939,13 @@ bool ScMatrixFormulaCellToken::operator==( const FormulaToken& r ) const
 
 void ScMatrixFormulaCellToken::CloneUpperLeftIfNecessary()
 {
-    if (xUpperLeft && xUpperLeft->GetType() == svDouble)
+    // Clone an svDouble because SetUpperLeftDouble changes it in place. Clone an
+    // uncounted token because storing it here would take no counted reference
+    // and leave the upper left dangling; this happens during threaded group
+    // calculation, when the group's pCode tokens are switched to
+    // RefCntPolicy::None. The clone is a normally reference-counted copy.
+    if (xUpperLeft && (xUpperLeft->GetType() == svDouble
+            || xUpperLeft->GetRefCntPolicy() == formula::RefCntPolicy::None))
         xUpperLeft = xUpperLeft->Clone();
 }
 
@@ -1032,10 +1041,10 @@ bool ScTokenArray::AddFormulaToken(
         bError = false;
         const OpCode eOpCode = static_cast<OpCode>(rToken.OpCode);      // assuming equal values for the moment
 
-        const uno::TypeClass eClass = rToken.Data.getValueTypeClass();
+        const cpo::uno::TypeClass eClass = rToken.Data.getValueTypeClass();
         switch ( eClass )
         {
-            case uno::TypeClass_STRUCT:
+            case cpo::uno::TypeClass_STRUCT:
                 {
                     cpo::uno::Type aType = rToken.Data.getValueType();
                     if ( aType.equals( cppu::UnoType<sheet::SingleReference>::get() ) )
@@ -1171,7 +1180,7 @@ bool ScTokenArray::AddFormulaToken(
                         bError = true;      // unknown struct
                 }
                 break;
-            case uno::TypeClass_SEQUENCE:
+            case cpo::uno::TypeClass_SEQUENCE:
                 {
                     if ( eOpCode != ocPush )
                         bError = true;      // not an inline array

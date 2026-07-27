@@ -25,7 +25,7 @@
 #include <vector>
 
 #include <com/sun/star/sdbc/XDriverManager2.hpp>
-#include <com/sun/star/uno/XNamingService.hpp>
+#include <cpo/uno/XNamingService.hpp>
 #include <com/sun/star/lang/XServiceInfo.hpp>
 #include <com/sun/star/lang/XSingleComponentFactory.hpp>
 
@@ -51,7 +51,7 @@ namespace drivermanager
 
     typedef ::cppu::WeakComponentImplHelper<   css::sdbc::XDriverManager2
                                   ,   css::lang::XServiceInfo
-                                  ,   css::uno::XNamingService
+                                  ,   cpo::uno::XNamingService
                                   >   OSDBCDriverManager_Base;
 
     class OSDBCDriverManager final : public cppu::BaseMutex, public OSDBCDriverManager_Base
@@ -79,30 +79,30 @@ namespace drivermanager
         virtual ~OSDBCDriverManager() override;
 
     // XDriverManager
-        virtual css::uno::Reference< css::sdbc::XConnection > SAL_CALL getConnection( const OUString& url ) override;
-        virtual css::uno::Reference< css::sdbc::XConnection > SAL_CALL getConnectionWithInfo( const OUString& url, const cpo::uno::Sequence< css::beans::PropertyValue >& info ) override;
-        virtual void SAL_CALL setLoginTimeout( sal_Int32 seconds ) override;
-        virtual sal_Int32 SAL_CALL getLoginTimeout(  ) override;
+        virtual css::uno::Reference< css::sdbc::XConnection > getConnection( const OUString& url ) override;
+        virtual css::uno::Reference< css::sdbc::XConnection > getConnectionWithInfo( const OUString& url, const cpo::uno::Sequence< css::beans::PropertyValue >& info ) override;
+        virtual void setLoginTimeout( sal_Int32 seconds ) override;
+        virtual sal_Int32 getLoginTimeout(  ) override;
 
     // XDriverAccess
-        virtual css::uno::Reference< css::sdbc::XDriver > SAL_CALL getDriverByURL( const OUString& url ) override;
+        virtual css::uno::Reference< css::sdbc::XDriver > getDriverByURL( const OUString& url ) override;
 
     // XEnumerationAccess
-        virtual css::uno::Reference< css::container::XEnumeration > SAL_CALL createEnumeration(  ) override;
+        virtual css::uno::Reference< css::container::XEnumeration > createEnumeration(  ) override;
 
     // XElementAccess
-        virtual cpo::uno::Type SAL_CALL getElementType(  ) override;
-        virtual bool SAL_CALL hasElements(  ) override;
+        virtual cpo::uno::Type getElementType(  ) override;
+        virtual bool hasElements(  ) override;
 
     // XServiceInfo
-        virtual OUString SAL_CALL getImplementationName(  ) override;
-        virtual bool SAL_CALL supportsService( const OUString& ServiceName ) override;
-        virtual cpo::uno::Sequence< OUString > SAL_CALL getSupportedServiceNames(  ) override;
+        virtual OUString getImplementationName(  ) override;
+        virtual bool supportsService( const OUString& ServiceName ) override;
+        virtual cpo::uno::Sequence< OUString > getSupportedServiceNames(  ) override;
 
     // XNamingService
-        virtual css::uno::Reference< css::uno::XInterface > SAL_CALL getRegisteredObject( const OUString& Name ) override;
-        virtual void SAL_CALL registerObject( const OUString& Name, const css::uno::Reference< css::uno::XInterface >& Object ) override;
-        virtual void SAL_CALL revokeObject( const OUString& Name ) override;
+        virtual css::uno::Reference< css::uno::XInterface > getRegisteredObject( const OUString& Name ) override;
+        virtual void registerObject( const OUString& Name, const css::uno::Reference< css::uno::XInterface >& Object ) override;
+        virtual void revokeObject( const OUString& Name ) override;
 
     private:
         css::uno::Reference< css::sdbc::XDriver > implGetDriverForURL(const OUString& _rURL);

@@ -38,6 +38,10 @@ interface MapInterface extends Evented {
 	};
 	addressInputField: AddressInputField;
 
+	tabsControl?: {
+		openContextMenuForFocusedTab(): void;
+	};
+
 	removeLayer(layer: any): void;
 	addLayer(layer: any): void;
 	setZoom(
@@ -220,7 +224,7 @@ interface MapInterface extends Evented {
 	zoomIn(delta: number, options?: any, animate?: boolean): MapInterface;
 	zoomOut(delta: number, options?: any, animate?: boolean): MapInterface;
 	cancelSearch(): void;
-	goToPage(page: string): void;
+	goToPage(page: string | number): void;
 	serverAuditDialog?: ServerAuditDialog;
 	_lockAccessibilityOn: boolean;
 	setAccessibilityState(enable: boolean): void;

@@ -24,8 +24,8 @@
 #include <span>
 
 #include <action.hxx>
-#include <cppcanvas/canvas.hxx>
-#include <cppcanvas/renderer.hxx>
+#include <canvas.hxx>
+#include <renderer.hxx>
 #include <vcl/kernarray.hxx>
 
 class VirtualDevice;
@@ -34,9 +34,9 @@ class Size;
 class Color;
 
 
-/* Definition of internal::TextActionFactory */
+/* Definition of TextActionFactory */
 
-namespace cppcanvas::internal
+namespace cppcanvas
     {
         struct OutDevState;
 
@@ -77,7 +77,6 @@ namespace cppcanvas::internal
                                                      VirtualDevice&                 rVDev,
                                                      const CanvasSharedPtr&         rCanvas,
                                                      const OutDevState&             rState,
-                                                     const Renderer::Parameters&    rParms,
                                                      bool                           bSubsettable );
         }
 }

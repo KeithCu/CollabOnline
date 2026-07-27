@@ -248,6 +248,13 @@ AC_ARG_ENABLE(fuzzers,
          For best results: --with-sanitizer=address,undefined])
 )
 
+AC_ARG_ENABLE(lto,
+    AS_HELP_STRING([--disable-lto],
+        [Do not use link-time optimization for the fuzzer build. LTO is on by
+         default under --enable-fuzzers; disabling it gives much faster
+         incremental link times at the cost of fuzzing performance.])
+)
+
 AC_ARG_ENABLE([androidapp],
               AS_HELP_STRING([--enable-androidapp],
                              [Use in a tree where the only purpose is to build the Android app that is supposed
@@ -353,6 +360,19 @@ AC_ARG_WITH([lo-builddir],
                             If you are building Android for a single ABI only, you may optionally specify only
                             the core for your ABI without any colons. In this case, providing an armeabi-v7a core
                             is not a requirement.]))
+
+AC_ARG_WITH([node-modules-dir],
+            [AS_HELP_STRING([--with-node-modules-dir=DIR],
+                           [Build the browser node_modules tree under DIR instead of in the
+                            browser build directory, and symlink it into the build directory.
+                            Put DIR on fast local storage when the build tree sits on a slow
+                            filesystem, such as a WSL drvfs mount, where node_modules is slow
+                            to create and to read. The tree is still removed and reinstalled on
+                            every build. DIR must be an absolute path and is the parent: the
+                            tree is created as DIR/node_modules. Default: node_modules is built
+                            in the browser build directory.])],
+            [NODE_MODULES_DIR="$withval"], [NODE_MODULES_DIR=])
+AC_SUBST([NODE_MODULES_DIR])
 
 AC_ARG_WITH([logfile],
             AS_HELP_STRING([--with-logfile=<path>],
@@ -474,8 +494,7 @@ AC_ARG_ENABLE([tests],
 
 AC_ARG_WITH([help-url],
             AS_HELP_STRING([--with-help-url=<url>],
-                [Set the base URL of the online help. Default is https://help.collaboraoffice.com/help.html?])
-                [--without-help-url Help buttons of dialogs will be disabled, external help website will not be used.],,)
+                [Set the base URL of the online help. By default help is disabled: the Help buttons of dialogs are hidden and no external help website is used. Pass e.g. --with-help-url=https://help.collaboraoffice.com/help.html? to enable it.]),,)
 
 AC_ARG_WITH([dictionaries],
             AS_HELP_STRING([--with-dictionaries=<language list>],
@@ -1561,8 +1580,8 @@ case "$enable_fuzzers" in
         AC_MSG_ERROR([unknown fuzzer engine '$enable_fuzzers' (use 'libfuzzer' or 'afl')])
         ;;
 esac
-if test "$LIBFUZZER" = "1"; then
-    # We require LTO for both libFuzzer and AFL. Unfortunately, with ThinLTO,
+if test "$LIBFUZZER" = "1" -a "$enable_lto" != "no"; then
+    # We use LTO for both libFuzzer and AFL. Unfortunately, with ThinLTO,
     # via either ld.bfd's LLVMgold plugin or lld's native ThinLTO, crash on
     # this codebase under clang/lld 18, but full -flto via lld links cleanly.
     # -Wl,--no-gc-sections works around a clang/lld LTO+ASan bug where
@@ -1583,10 +1602,13 @@ if test "$LIBFUZZER" = "1"; then
          AC_MSG_ERROR([the fuzzer build requires a C++ toolchain that links with '-flto -fuse-ld=lld -Wl,--no-gc-sections'; install lld (e.g. apt install lld) and a clang/gcc that supports -flto, or omit --enable-fuzzers])])
     AC_LANG_POP([C++])
     LDFLAGS=$fuzzer_check_saved_LDFLAGS
+elif test "$LIBFUZZER" = "1"; then
+    AC_MSG_NOTICE([LTO disabled for the fuzzer build (--disable-lto); links will be faster but fuzzing slower])
 fi
 AC_DEFINE_UNQUOTED([LIBFUZZER],[$LIBFUZZER],[Define to 1 if this is a fuzzer build.])
 AM_CONDITIONAL([ENABLE_FUZZERS], [test "$LIBFUZZER" = "1"])
 AM_CONDITIONAL([ENABLE_AFL], [test "$FUZZER_ENGINE" = "afl"])
+AM_CONDITIONAL([ENABLE_FUZZER_LTO], [test "$LIBFUZZER" = "1" -a "$enable_lto" != "no"])
 AC_SUBST([FUZZER_ENGINE])
 AC_SUBST([FUZZER_LDFLAGS])
 AC_SUBST([AFL_DRIVER_LIB])
@@ -2361,7 +2383,7 @@ AC_CONFIG_LINKS([browser/.prettierrc:browser/.prettierrc])
 AC_CONFIG_LINKS([cypress_test/package.json:cypress_test/package.json])
 AC_CONFIG_COMMANDS_PRE([
 if test "$srcdir" != '.'; then
-   dst_dirs="cypress_test/plugins cypress_test/eslint_plugin browser/node_shrinkpack"
+   dst_dirs="cypress_test/plugins cypress_test/eslint_plugin cypress_test/data browser/node_shrinkpack"
    src_dir=
    for dst_dir in $dst_dirs
    do
@@ -2468,12 +2490,9 @@ AC_MSG_CHECKING([for URL of online help])
 if test -n "$with_help_url" -a "$with_help_url" != "no"; then
     HELP_URL="$with_help_url"
     AC_MSG_RESULT([custom: $HELP_URL])
-elif test "$with_help_url" = "no"; then
+else
     HELP_URL=
     AC_MSG_RESULT([none, help buttons are disabled])
-else
-    HELP_URL="https://help.collaboraoffice.com/help.html?"
-    AC_MSG_RESULT([default: $HELP_URL])
 fi
 AC_SUBST(HELP_URL)
 AC_DEFINE_UNQUOTED([HELP_URL],["$HELP_URL"],[Default value of help root URL])
@@ -2709,6 +2728,7 @@ AM_CONDITIONAL([ENABLE_WASM_ZETAJS_EXAMPLE], [test "$ENABLE_WASM_ZETAJS_EXAMPLE"
 
 AC_CONFIG_FILES([Makefile
                  cypress_test/Makefile
+                 cypress_test/fontconfig/cypress-fonts.conf
                  fuzzer/Makefile
                  macos/Makefile
                  qt/Makefile

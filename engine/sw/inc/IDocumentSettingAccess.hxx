@@ -144,12 +144,17 @@ enum class DocumentSettingId
     // tdf#161233 pictures with wrap polygon should not be clipped
     NO_CLIPPING_WITH_WRAP_POLYGON,
     MS_WORD_UL_TRAIL_SPACE,
+    // tdf#172113: from a visual perspective, consistently put the line spacing gap below the line,
+    // consistently and interoperably determining line heights for all (first/middle/last) lines.
+    LINE_SPACING_AS_GAP_BELOW,
     // tdf#88908 optionally adjust normal spaces in CJK context to halfwidth
     BALANCE_SPACES_AND_IDEOGRAPHIC_SPACES,
     // tdf#37153 Word-compatibility: force top-alignment for cells containing a floating shape
     FORCE_TOP_ALIGNMENT_IN_CELL_WITH_FLOATING_ANCHOR,
     // tdf#167583 optionally apply text grid line height to table contents
     ADJUST_TABLE_LINE_HEIGHTS_TO_GRID_HEIGHT,
+    // tdf#159133 left/right page is not decided by even/odd page number
+    ASSIGN_CONSECUTIVE_LEFT_RIGHT_PAGES
 };
 
 /** Provides access to settings of a document

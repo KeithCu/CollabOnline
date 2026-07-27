@@ -52,7 +52,7 @@ namespace dbaccess
 {
 class OCommandContainer;
 
-typedef std::vector< css::uno::WeakReference< css::sdbc::XConnection > > OWeakConnectionArray;
+typedef std::vector< cpo::uno::WeakReference< css::sdbc::XConnection > > OWeakConnectionArray;
 
 struct DefaultPropertyValue
 {
@@ -65,14 +65,14 @@ struct DefaultPropertyValue
         ,DefaultValue( _rDefaultValue )
         ,ValueType( _rDefaultValue.getValueType() )
     {
-        OSL_ENSURE( ValueType.getTypeClass() != css::uno::TypeClass_VOID,
+        OSL_ENSURE( ValueType.getTypeClass() != cpo::uno::TypeClass_VOID,
             "AsciiPropertyValue::AsciiPropertyValue: NULL values not allowed here, use the other CTOR for this!" );
     }
     DefaultPropertyValue(const OUString& _aName, const cpo::uno::Type& _rValeType)
         :Name( _aName )
         ,ValueType( _rValeType )
     {
-        OSL_ENSURE( ValueType.getTypeClass() != css::uno::TypeClass_VOID,
+        OSL_ENSURE( ValueType.getTypeClass() != cpo::uno::TypeClass_VOID,
             "AsciiPropertyValue::AsciiPropertyValue: VOID property values not supported!" );
     }
 };
@@ -135,7 +135,7 @@ protected:
 public:
     explicit OSharedConnectionManager(const css::uno::Reference< css::uno::XComponentContext >& _rxContext);
 
-    void SAL_CALL disposing( const css::lang::EventObject& Source ) override;
+    void disposing( const css::lang::EventObject& Source ) override;
     css::uno::Reference< css::sdbc::XConnection > getConnection(   const OUString& url,
                                             const OUString& user,
                                             const OUString& password,
@@ -218,7 +218,7 @@ public:
     const css::uno::Reference< css::uno::XComponentContext >  m_aContext;
 
 public:
-    css::uno::WeakReference< css::container::XNameAccess >    m_xCommandDefinitions;
+    cpo::uno::WeakReference< css::container::XNameAccess >    m_xCommandDefinitions;
     unotools::WeakReference< ::dbaccess::OCommandContainer > m_xTableDefinitions;
 
     css::uno::Reference< css::util::XNumberFormatsSupplier >

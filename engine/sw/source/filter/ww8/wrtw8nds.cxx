@@ -58,6 +58,7 @@
 #include <frmatr.hxx>
 #include <paratr.hxx>
 #include <txatbase.hxx>
+#include <txtrfmrk.hxx>
 #include <fmtinfmt.hxx>
 #include <fmtrfmrk.hxx>
 #include <fchrfmt.hxx>
@@ -1310,11 +1311,22 @@ OUString BookmarkToWriter(std::u16string_view rBookmark)
         INetURLObject::DecodeMechanism::Unambiguous, RTL_TEXTENCODING_ASCII_US);
 }
 
-void SwWW8AttrIter::OutSwFormatRefMark(const SwFormatRefMark& rAttr)
+void SwWW8AttrIter::OutSwFormatRefMark(const SwFormatRefMark& rAttr, sal_Int32 nPos)
 {
-    if(m_rExport.HasRefToAttr(rAttr.GetRefName().toString()))
-        m_rExport.AppendBookmark( m_rExport.GetBookmarkName( ReferencesSubtype::SetRefAttr,
-                                            &rAttr.GetRefName().toString(), 0 ));
+    const OUString sRefName = rAttr.GetRefName().toString();
+    if (!m_rExport.HasRefToAttr(sRefName))
+        return;
+
+    const OUString sName = m_rExport.GetBookmarkName(ReferencesSubtype::SetRefAttr, &sRefName, 0);
+
+    const SwTextRefMark& rRefMark = *rAttr.GetTextRefMark();
+    const bool bIsStart = rRefMark.GetStart() == nPos;
+    const bool bIsEnd = !rRefMark.GetEnd() || *rRefMark.GetEnd() == nPos;
+    const bool bIsFinal = nPos == m_rNode.GetText().getLength();
+    if (bIsStart)
+        m_rExport.AppendBookmarkStart(sName);
+    if (bIsEnd)
+        m_rExport.AppendBookmarkEnd(sName, bIsFinal);
 }
 
 void SwWW8AttrIter::SplitRun( sal_Int32 nSplitEndPos )
@@ -1436,7 +1448,7 @@ void AttributeOutputBase::TOXMark( const SwTextNode& rNode, const SwTOXMark& rAt
     }
 }
 
-int SwWW8AttrIter::OutAttrWithRange(const SwTextNode& rNode, sal_Int32 nPos)
+int SwWW8AttrIter::OutAttrWithRange(sal_Int32 nPos)
 {
     int nRet = 0;
     if ( const SwpHints* pTextAttrs = m_rNode.GetpSwpHints() )
@@ -1462,7 +1474,7 @@ int SwWW8AttrIter::OutAttrWithRange(const SwTextNode& rNode, sal_Int32 nPos)
                     pEnd = pHt->End();
                     if (nullptr != pEnd && nPos == *pEnd && nPos != pHt->GetStart())
                     {
-                        OutSwFormatRefMark(*static_cast<const SwFormatRefMark*>(pItem));
+                        OutSwFormatRefMark(*static_cast<const SwFormatRefMark*>(pItem), nPos);
                         --nRet;
                     }
                     break;
@@ -1470,7 +1482,7 @@ int SwWW8AttrIter::OutAttrWithRange(const SwTextNode& rNode, sal_Int32 nPos)
                     pEnd = pHt->End();
                     if (nPos == *pEnd && nPos != pHt->GetStart())
                     {
-                        m_rExport.AttrOutput().EndRuby(rNode, nPos, false);
+                        m_rExport.AttrOutput().EndRuby(m_rNode, nPos, false);
                         --nRet;
                     }
                     break;
@@ -1501,15 +1513,17 @@ int SwWW8AttrIter::OutAttrWithRange(const SwTextNode& rNode, sal_Int32 nPos)
                 case RES_TXTATR_REFMARK:
                     if ( nPos == pHt->GetStart() )
                     {
-                        OutSwFormatRefMark( *static_cast< const SwFormatRefMark* >( pItem ) );
-                        ++nRet;
+                        OutSwFormatRefMark(*static_cast<const SwFormatRefMark*>(pItem), nPos);
+                        if (pHt->End())
+                            ++nRet;
                     }
                     pEnd = pHt->End();
                     if (nullptr != pEnd && nPos == *pEnd && nPos == pHt->GetStart())
                     {   // special case: empty TODO: is this possible or would empty one have pEnd null?
-                        OutSwFormatRefMark( *static_cast< const SwFormatRefMark* >( pItem ) );
                         --nRet;
+                        assert(false); // if possible, already handled by OutSwFormatRefMark
                     }
+
                     break;
                 case RES_TXTATR_TOXMARK:
                     if ( nPos == pHt->GetStart() )
@@ -2559,7 +2573,7 @@ void MSWordExportBase::OutputTextNode( SwTextNode& rNode )
                 AppendSmartTags(rNode);
 
             bool bTextAtr = aAttrIter.IsTextAttr( nCurrentPos );
-            nOpenAttrWithRange += aAttrIter.OutAttrWithRange( rNode, nCurrentPos );
+            nOpenAttrWithRange += aAttrIter.OutAttrWithRange(nCurrentPos);
 
             sal_Int32 nLen = nNextAttr - nCurrentPos;
 
@@ -2828,7 +2842,7 @@ void MSWordExportBase::OutputTextNode( SwTextNode& rNode )
                 bool bAttrWithRange = (nOpenAttrWithRange > 0);
                 if ( nCurrentPos != nEnd )
                 {
-                    nOpenAttrWithRange += aAttrIter.OutAttrWithRange( rNode, nEnd );
+                    nOpenAttrWithRange += aAttrIter.OutAttrWithRange(nEnd);
                     OSL_ENSURE(nOpenAttrWithRange == 0,
                             "odd to see this happening, expected 0");
                 }

@@ -6,6 +6,7 @@
 
 #include <config.h>
 
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -121,6 +122,10 @@ static int appShowMode;
 
 static bool weOwnTheClipboard = false;
 
+// The COKit Office object, captured when the clipboard provider is installed, so a clipboard read
+// can go straight to the process-shared clipboard without needing a particular document.
+static kit::Office* office = nullptr;
+
 const char* user_name = nullptr;
 int coolwsd_server_socket_fd = -1;
 
@@ -143,8 +148,8 @@ static std::thread coolwsdThread;
 // The main window class name.
 static const wchar_t windowClass[] = L"CODA";
 
-// The file open dialog dummy owner window class name.
-static const wchar_t dummyWindowClass[] = L"CODADummyFileDialogOwnerWindow";
+// The hidden file open dialog and clipboard owner window class name.
+static const wchar_t hiddenOwnerWindowClass[] = L"CODAHiddenOwnerWindow";
 // The handle of that dummy window.
 static HWND hiddenOwnerWindow;
 
@@ -165,7 +170,7 @@ static FilenameAndUri fileSaveDialog(const std::string& name,
 
 static void openCOOLWindow(const FilenameAndUri& filenameAndUri, DocumentMode mode);
 
-static HANDLE copyEngineClipboardData(int appDocId, UINT format, const std::string& mimeType);
+static HANDLE copyEngineClipboardData(UINT format, const std::string& mimeType);
 
 static std::string MIME_type_for_clipboard_format(UINT format);
 
@@ -698,6 +703,232 @@ static std::string get_html_clipboard_fragment(const char* data)
     return htmlData.substr(startPos, endPos - startPos);
 }
 
+// Convert an HTML document into the Windows "HTML Format" clipboard payload.
+//
+// See
+// https://learn.microsoft.com/en-us/windows/win32/dataxchg/html-clipboard-format
+// for the specification of that format.
+//
+// This is deliberately a tiny tokenizer, not a full parser. It is not likely that
+// engine would actually produce pathological HTML with things like the string "<body"
+// inside an attribute, comment, or whatever, but be careful anyway.
+//   * The <body> start tag may carry attributes; we find the true end '>'
+//     of the start tag while respecting quoted attribute values.
+//   * The substring "<body" may occur inside an attribute value in <head>
+//     (e.g. <meta content="<body>">). Because we scan tag by tag and skip
+//     over quoted attribute regions, such occurrences are not mistaken for
+//     the body element.
+//   * Comments, <!doctype>/<?...?> declarations, and the raw-text elements
+//     <script>/<style>/<textarea>/<title> are skipped wholesale, so "<body"
+//     or "</body>" appearing as text/inside them is ignored too.
+//
+//  Header lines use CRLF, matching what Windows browsers emit.
+
+struct BodySpan
+{
+    bool found = false;
+    bool endFound = false;
+    std::size_t startBegin = 0;
+    std::size_t endEnd = 0;
+};
+
+static bool case_insensitive_match(const std::string& haystack, std::size_t pos, const std::string_view needle)
+{
+    if (pos + needle.size() > haystack.size())
+        return false;
+    for (std::size_t k = 0; k < needle.size(); ++k)
+    {
+        auto a = static_cast<unsigned char>(haystack[pos + k]);
+        auto b = static_cast<unsigned char>(needle[k]);
+        if (std::tolower(a) != std::tolower(b))
+            return false;
+    }
+    return true;
+}
+
+// i points at the '<' of a tag. Return the index just past the tag's
+// closing '>', honoring single- and double-quoted attribute values (so a
+// '>' inside a quoted value does not end the tag).
+static std::size_t skip_tag(const std::string& s, std::size_t i)
+{
+    const std::size_t n = s.size();
+    ++i;
+    char quote = 0;
+    while (i < n)
+    {
+        char c = s[i];
+        if (quote)
+        {
+            if (c == quote)
+                quote = 0;
+        }
+        else if (c == '"' || c == '\'')
+            quote = c;
+        else if (c == '>')
+            return i + 1;
+        ++i;
+    }
+    return n; // unterminated tag: treat rest of string as the tag
+}
+
+static bool name_equals(const std::string_view name, const std::string_view lit)
+{
+    if (name.size() != lit.size())
+        return false;
+    for (std::size_t k = 0; k < lit.size(); ++k)
+    {
+        if (std::tolower(static_cast<unsigned char>(name[k])) !=
+            std::tolower(static_cast<unsigned char>(lit[k])))
+            return false;
+    }
+    return true;
+}
+
+static BodySpan find_body(const std::string& s)
+{
+    BodySpan r;
+    const std::size_t n = s.size();
+    std::size_t i = 0;
+
+    while (i < n)
+    {
+        if (s[i] != '<')
+        {
+            ++i;
+            continue;
+        }
+
+        // Comment: <!-- ... -->
+        if (case_insensitive_match(s, i, "<!--"))
+        {
+            std::size_t e = s.find("-->", i + 4);
+            i = (e == std::string::npos) ? n : e + 3;
+            continue;
+        }
+        // Declaration or processing instruction: <! ... >  /  <? ... >
+        if (i + 1 < n && (s[i + 1] == '!' || s[i + 1] == '?'))
+        {
+            std::size_t e = s.find('>', i + 2);
+            i = (e == std::string::npos) ? n : e + 1;
+            continue;
+        }
+
+        const bool isEnd = (i + 1 < n && s[i + 1] == '/');
+        const std::size_t nameStart = i + (isEnd ? 2 : 1);
+
+        // Read an ASCII tag name (letters, digits, '-').
+        std::size_t j = nameStart;
+        while (j < n)
+        {
+            unsigned char u = static_cast<unsigned char>(s[j]);
+            if (std::isalnum(u) || u == '-')
+                ++j;
+            else
+                break;
+        }
+        std::string_view name(s.data() + nameStart, j - nameStart);
+
+        if (name.empty()) // a bare '<' that isn't a real tag
+        {
+            ++i;
+            continue;
+        }
+
+        if (!isEnd && name_equals(name, "body"))
+        {
+            r.found = true;
+            r.startBegin = i;
+            i = skip_tag(s, i); // step past the (possibly attributed) start tag
+            continue;
+        }
+        if (isEnd && name_equals(name, "body"))
+        {
+            r.endFound = true;
+            r.endEnd = skip_tag(s, i);
+            break; // done: we have both ends
+        }
+
+        // Raw-text elements: skip their entire content to the matching end tag
+        // so their text (which may contain '<', '>', quotes, "<body>", etc.)
+        // never confuses the scan.
+        if (!isEnd && (name_equals(name, "script") || name_equals(name, "style") ||
+                       name_equals(name, "textarea") || name_equals(name, "title")))
+        {
+            std::size_t after = skip_tag(s, i);
+            std::string endTag = "</";
+            endTag.append(name);
+            std::size_t e = after;
+            std::size_t close = std::string::npos;
+            while (e + endTag.size() <= n)
+            {
+                if (case_insensitive_match(s, e, endTag))
+                {
+                    close = e;
+                    break;
+                }
+                ++e;
+            }
+            i = (close == std::string::npos) ? n : skip_tag(s, close);
+            continue;
+        }
+
+        // Any other tag: skip it.
+        i = skip_tag(s, i);
+    }
+    return r;
+}
+
+static std::string num10(std::size_t v)
+{
+    char b[24];
+    std::snprintf(b, sizeof b, "%010zu", v);
+    return std::string(b);
+}
+
+static std::string build_header(std::size_t startHtml, std::size_t endHtml,
+                                std::size_t startFrag, std::size_t endFrag)
+{
+    std::string h;
+    h += "Version:0.9\r\n";
+    h += "StartHTML:"     + num10(startHtml) + "\r\n";
+    h += "EndHTML:"       + num10(endHtml)   + "\r\n";
+    h += "StartFragment:" + num10(startFrag) + "\r\n";
+    h += "EndFragment:"   + num10(endFrag)   + "\r\n";
+    return h;
+}
+
+std::string generate_html_format(const std::string& html)
+{
+    static const std::string SF = "<!--StartFragment-->";
+    static const std::string EF = "<!--EndFragment-->";
+
+    // Measure the headers once with dummy values.
+    const std::size_t headerLen = build_header(0, 0, 0, 0).size();
+
+    // Locate the body. Degrade gracefully if it's missing or unterminated.
+    const BodySpan b = find_body(html);
+    const std::size_t startBegin = b.found ? b.startBegin : 0;
+    const std::size_t endEnd = (b.found && b.endFound) ? b.endEnd : html.size();
+
+    // Assemble the content: prefix + <!--StartFragment--> + <body>..</body>
+    //                       + <!--EndFragment--> + suffix.
+    std::string content;
+    content.reserve(html.size() + SF.size() + EF.size());
+    content.append(html, 0, startBegin);
+    content.append(SF);
+    content.append(html, startBegin, endEnd - startBegin);
+    content.append(EF);
+    content.append(html, endEnd, std::string::npos);
+
+    // Offsets are byte positions from the very start of the payload.
+    const std::size_t startHtml = headerLen;
+    const std::size_t endHtml = headerLen + content.size();
+    const std::size_t startFrag = headerLen + startBegin + SF.size(); // at '<body'
+    const std::size_t endFrag = headerLen + endEnd + SF.size(); // just past '</body>'
+
+    return build_header(startHtml, endHtml, startFrag, endFrag) + content;
+}
+
 static void do_open_hyperlink(HWND hWnd, std::wstring url)
 {
     // For file: URIs hand ShellExecute a native (UNC-aware) Windows path; other
@@ -996,6 +1227,41 @@ static void arrangePresentationWindows(WindowData& data)
 // tools. The range 0x0000 to 0xBFFF is reserved for application hotkeys.
 static const int HOTKEY_ID_DEVTOOLS = 0x00DA;
 
+// Window procedure for a hidden window used as clipboard owner. It lives for the whole app run, so
+// its delayed-render promise only has to be materialized (WM_RENDERALLFORMATS) once, when the app
+// exits, not when an individual document window closes. Also used as parent window for the file
+// open and save dialogs.
+static LRESULT CALLBACK HiddenOwnerWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+        case WM_RENDERFORMAT:
+        {
+            UINT format = (UINT)wParam;
+            std::string mimeType = MIME_type_for_clipboard_format(format);
+            if (!mimeType.empty())
+            {
+                HANDLE hData = copyEngineClipboardData(format, mimeType);
+                if (hData)
+                    SetClipboardData(format, hData);
+            }
+            return 0;
+        }
+
+        case WM_RENDERALLFORMATS:
+            // This window is about to be destroyed (the app is exiting) while it still owns the
+            // clipboard with formats it only promised. Render them all now, so the content outlives
+            // the app. The engine still holds the one shared clipboard, so the bytes are available.
+            materialize_clipboard_formats();
+            return 0;
+
+        case WM_DESTROYCLIPBOARD:
+            weOwnTheClipboard = false;
+            return 0;
+    }
+    return DefWindowProc(hWnd, message, wParam, lParam);
+}
+
 static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
@@ -1243,22 +1509,6 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
             break;
         }
 
-        case WM_RENDERFORMAT:
-        {
-            UINT format = (UINT)wParam;
-            std::string mimeType = MIME_type_for_clipboard_format(format);
-            if (mimeType == "")
-                break;
-            HANDLE hData = copyEngineClipboardData(windowData[hWnd].appDocId, format, mimeType);
-            if (!hData)
-                break;
-            SetClipboardData(format, hData);
-            break;
-        }
-
-        case WM_DESTROYCLIPBOARD:
-            weOwnTheClipboard = false;
-            break;
 
         case CODA_WM_EXECUTESCRIPT:
             windowData[hWnd].webView->ExecuteScript(
@@ -1898,6 +2148,10 @@ static void openCOOLWindow(const FilenameAndUri& filenameAndUri, DocumentMode mo
                             data.webView = wil::com_ptr<ICoreWebView2>(webView);
                             data.webViewController = controller;
 
+                            wil::com_ptr<ICoreWebView2_22> webView22 = data.webView.try_query<ICoreWebView2_22>();
+                            if (!webView22)
+                                fatal("Could not get webView22");
+
                             // Add a few settings for the webview
                             // The demo step is redundant since the values are the default settings
                             wil::com_ptr<ICoreWebView2Settings> settings;
@@ -1923,12 +2177,13 @@ static void openCOOLWindow(const FilenameAndUri& filenameAndUri, DocumentMode mo
                             EventRegistrationToken token;
                             HRESULT hr;
 
-                            hr = (webView->AddWebResourceRequestedFilter(
+                            hr = (webView22->AddWebResourceRequestedFilterWithRequestSourceKinds(
                                       L"cool://*",
-                                      COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL));
+                                      COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                                      COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL));
                             if (!SUCCEEDED(hr))
                             {
-                                LOG_ERR_S("AddWebResourceRequestedFilter() failed");
+                                LOG_ERR_S("AddWebResourceRequestedFilterWithRequestSourceKinds() failed");
                                 return hr;
                             }
 
@@ -2301,27 +2556,19 @@ static void free_getClipboard_results(size_t count, char** mimeTypes, size_t* si
     std::free(streams);
 }
 
-static HANDLE copyEngineClipboardData(int appDocId, UINT format, const std::string& mimeType)
+static HANDLE copyEngineClipboardData(UINT format, const std::string& mimeType)
 {
-    DocumentData* docData = DocumentData::getIfExists(appDocId);
-    if (!docData)
-        return 0;               // Huh?
-
-    kit::Document* loKitDoc = docData->loKitDocument;
-    if (!loKitDoc)
-        return 0;               // Even more huh?
-
-    int nViewId = -1;
-    if (!loKitDoc->getViewIds(&nViewId, 1) || nViewId < 0)
+    // The clipboard is process-global (one shared clipboard for the desktop app), so read it
+    // straight from the engine; no document is involved.
+    if (!office)
         return 0;
-    loKitDoc->setView(nViewId);
 
     const char *filter[] = { mimeType.c_str(), nullptr };
     size_t outCount = 0;
     char **outMimeTypes = nullptr;
     size_t *outSizes = nullptr;
     char **outStreams = nullptr;
-    if (!loKitDoc->getClipboard(filter, &outCount, &outMimeTypes, &outSizes, &outStreams) ||
+    if (!office->getGlobalClipboard(filter, &outCount, &outMimeTypes, &outSizes, &outStreams) ||
         outCount == 0)
         return 0;
 
@@ -2334,12 +2581,19 @@ static HANDLE copyEngineClipboardData(int appDocId, UINT format, const std::stri
     HGLOBAL hMem;
     const void *src;
     size_t size;
-    std::wstring temp;
+    std::wstring wtemp;
+    std::string temp;
     if (format == CF_UNICODETEXT && mimeType == "text/plain;charset=utf-8")
     {
-        temp = Util::string_to_wide_string(std::string_view(outStreams[0], outSizes[0]));
+        wtemp = Util::string_to_wide_string(std::string_view(outStreams[0], outSizes[0]));
+        src = wtemp.c_str();
+        size = (wtemp.length() + 1) * 2;
+    }
+    else if (format == RegisterClipboardFormatW(L"HTML Format") && mimeType == "text/html")
+    {
+        temp = generate_html_format(std::string(outStreams[0], outSizes[0]));
         src = temp.c_str();
-        size = (temp.length() + 1) * 2;
+        size = temp.length();
     }
     else
     {
@@ -2390,7 +2644,7 @@ static std::string MIME_type_for_clipboard_format(UINT format)
         return "image/png";
     else if (name == L"Rich Text Format")
         return "text/rtf";
-    else if (name == L"HTML (HyperText Markup Language)" || name == L"HTML Format")
+    else if (name == L"HTML Format")
         return "text/html";
 
     return "";
@@ -2405,10 +2659,7 @@ static std::vector<int> clipboard_formats_for_MIME_type(const char* mimeType)
     else if (std::strcmp(mimeType, "text/rtf") == 0)
         result.push_back(RegisterClipboardFormatW(L"Rich Text Format"));
     else if (std::strcmp(mimeType, "text/html") == 0)
-    {
         result.push_back(RegisterClipboardFormatW(L"HTML Format"));
-        result.push_back(RegisterClipboardFormatW(L"HTML (HyperText Markup Language)"));
-    }
     else if (std::strcmp(mimeType, "text/markdown") == 0)
     {
         result.push_back(RegisterClipboardFormatW(L"text/markdown"));
@@ -2430,17 +2681,21 @@ static std::vector<int> clipboard_formats_for_MIME_type(const char* mimeType)
 }
 
 /**
- * The clipboard provider the engine drives. On copy the engine advertises its
- * formats through advertise; on an external paste it reads the pasteboard one
- * format at a time. pUserData is a retained Document so the callbacks can reuse
- * the document's clipboard helpers.
+ * The clipboard provider the engine drives. On copy the engine advertises its formats through
+ * advertise; on an external paste it reads the clipboard one format at a time. The callbacks
+ * act on the process, not one window, so the one shared clipboard is reached from whichever
+ * document is current.
  */
 
-static void clipboardProviderAdvertise(void* pUserData, const char** pMimeTypes)
+static void clipboardProviderAdvertise(const char** pMimeTypes)
 {
-    WindowData& data = *(WindowData*)pUserData;
+    // Delayed rendering needs a live window to own the clipboard and receive WM_RENDERFORMAT. Use
+    // the hidden owner window, which lives for the whole app run. The clipboard is only rendered in
+    // full (WM_RENDERALLFORMATS) when the app exits, not when an individual document window closes.
+    if (!hiddenOwnerWindow)
+        return;
 
-    if (!try_open_clipboard(data.hWnd))
+    if (!try_open_clipboard(hiddenOwnerWindow))
         return;
 
     if (!EmptyClipboard())
@@ -2468,16 +2723,18 @@ static void clipboardProviderAdvertise(void* pUserData, const char** pMimeTypes)
     CloseClipboard();
 }
 
-static int clipboardProviderOwns(void* /*pUserData*/)
+static int clipboardProviderOwns()
 {
     return weOwnTheClipboard;
 }
 
-static char** clipboardProviderGetMimeTypes(void* pUserData)
+static char** clipboardProviderGetMimeTypes()
 {
-    WindowData& data = *(WindowData*)pUserData;
-
-    if (!try_open_clipboard(data.hWnd))
+    // Reading needs no owner window, so open the clipboard for the current "task".
+    //
+    // (Task is an 16-bit Windows term still used in documentation for the clipboard API that is
+    // basically unchanged since then. In current Windows, it means thread, more or less.)
+    if (!try_open_clipboard(NULL))
         return NULL;
 
     UINT format = 0;
@@ -2518,17 +2775,14 @@ static char** clipboardProviderGetMimeTypes(void* pUserData)
     return result;
 }
 
-static int clipboardProviderGetData(void* pUserData, const char* pMimeType, char** pOutData,
-                                    size_t* pOutSize)
+static int clipboardProviderGetData(const char* pMimeType, char** pOutData, size_t* pOutSize)
 {
     auto formats = clipboard_formats_for_MIME_type(pMimeType);
 
     if (formats.size() == 0)
         return 0;
 
-    WindowData& data = *(WindowData*)pUserData;
-
-    if (!try_open_clipboard(data.hWnd))
+    if (!try_open_clipboard(NULL))
         return 0;
 
     for (const auto& format : formats)
@@ -2582,44 +2836,58 @@ static int clipboardProviderGetData(void* pUserData, const char* pMimeType, char
     return 0;
 }
 
-static void clipboardProviderRelease(void* /* pUserData */)
+
+// Install the process-global clipboard provider (declared in windows.hpp). After this the engine
+// advertises formats on copy and reads the clipboard on paste through the callbacks above, using
+// one shared clipboard for every document.
+void install_clipboard_provider(kit::Office& kitOffice)
 {
-    // ???
-}
+    office = &kitOffice;
 
-static void ensureClipboardProviderFor(WindowData& data)
-{
-    static std::set<int> registeredDocs;
-
-    if (registeredDocs.count(data.appDocId))
-        return;
-
-    DocumentData* docData = DocumentData::getIfExists(data.appDocId);
-    if (!docData)
-        return;                 // The document is not loaded yet; try again on the next message
-
-    kit::Document* loKitDoc = docData->loKitDocument;
-    if (!loKitDoc)
-        return;                 // Unclear when this could happen
-
-    COKitClipboardProvider provider{};
-    provider.nSize = sizeof(provider);
-    provider.pUserData = &data;
+    static COKitClipboardProvider provider{};
     provider.advertiseToPlatform = clipboardProviderAdvertise;
     provider.ownsClipboard = clipboardProviderOwns;
     provider.getMimeTypes = clipboardProviderGetMimeTypes;
     provider.getDataForMimeType = clipboardProviderGetData;
-    provider.release = clipboardProviderRelease;
+    kitOffice.installClipboardProvider(&provider);
+}
 
-    loKitDoc->installClipboardProvider(&provider);
+void materialize_clipboard_formats()
+{
+    static bool beenHere = false;
 
-    registeredDocs.insert(data.appDocId);
+    if (beenHere)
+        return;
+
+    beenHere = true;
+
+    if (GetClipboardOwner() == hiddenOwnerWindow)
+    {
+        if (try_open_clipboard(hiddenOwnerWindow))
+        {
+            // Collect the promised formats first, then render each. Do not probe with
+            // GetClipboardData here(): on a still-promised format it would send
+            // WM_RENDERFORMAT again. Re-setting an already-rendered format is harmless.
+            std::vector<UINT> formats;
+            UINT format = 0;
+            while ((format = EnumClipboardFormats(format)) != 0)
+                formats.push_back(format);
+            for (UINT f : formats)
+            {
+                std::string mimeType = MIME_type_for_clipboard_format(f);
+                if (mimeType.empty())
+                    continue;
+                HANDLE hData = copyEngineClipboardData(f, mimeType);
+                if (hData)
+                    SetClipboardData(f, hData);
+            }
+            CloseClipboard();
+        }
+    }
 }
 
 static void processMessage(WindowData& data, wil::unique_cotaskmem_string& message)
 {
-    ensureClipboardProviderFor(data);
-
     std::wstring s(message.get());
     LOG_TRC(Util::wide_string_to_string(s));
     if (s.starts_with(L"MSG "))
@@ -2647,8 +2915,11 @@ static void processMessage(WindowData& data, wil::unique_cotaskmem_string& messa
         }
         else if (s.starts_with(L"TEXTCLIPBOARD "))
         {
+            // A plain-text copy from the web UI (for example the About dialog), not document
+            // content, so it does not go through the engine's clipboard. Own it with the same
+            // hidden window the provider uses, so no document window ever owns the clipboard.
             std::wstring text = s.substr(14);
-            if (try_open_clipboard(data.hWnd))
+            if (try_open_clipboard(hiddenOwnerWindow))
             {
                 EmptyClipboard();
                 HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
@@ -2835,6 +3106,13 @@ static void processMessage(WindowData& data, wil::unique_cotaskmem_string& messa
                     filenamesAndUrisToOpen.push_back(i);
 
                 load_next_document();
+
+                // The picked document opens in its own window; return the
+                // originating window to its document view.
+                if (data.mode != DocumentMode::STARTER)
+                    PostMessageW(data.hWnd, CODA_WM_EXECUTESCRIPT,
+                                 (WPARAM)_strdup("window.app?.map?.backstageView?.returnToDocumentView()"),
+                                 0);
             }
             // Close the starter window
             if (data.mode == DocumentMode::STARTER)
@@ -3135,7 +3413,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int showWindowMode)
 
         wcex.cbSize = sizeof(WNDCLASSEXW);
         wcex.style = 0;
-        wcex.lpfnWndProc = DefWindowProc;
+        wcex.lpfnWndProc = HiddenOwnerWndProc;
         wcex.cbClsExtra = 0;
         wcex.cbWndExtra = 0;
         wcex.hInstance = hInstance;
@@ -3143,7 +3421,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int showWindowMode)
         wcex.hCursor = LoadCursor(NULL, IDC_ARROW);
         wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
         wcex.lpszMenuName = NULL;
-        wcex.lpszClassName = dummyWindowClass;
+        wcex.lpszClassName = hiddenOwnerWindowClass;
         wcex.hIconSm = NULL;
 
         if (!RegisterClassExW(&wcex))
@@ -3152,7 +3430,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int showWindowMode)
             return 1;
         }
 
-        hiddenOwnerWindow = CreateWindowW(dummyWindowClass, L"CODAHiddenOwnerWindow",
+        hiddenOwnerWindow = CreateWindowW(hiddenOwnerWindowClass, L"CODAHiddenOwnerWindow",
                                           WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                                           100, 100, NULL, NULL,
                                           hInstance, NULL);
@@ -3193,13 +3471,12 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int showWindowMode)
             argv[0] = _strdup("mobile");
             argv[1] = nullptr;
             ProcUtil::setThreadName("app");
-            while (true)
-            {
-                coolwsd = new COOLWSD();
-                coolwsd->run(1, argv);
-                delete coolwsd;
-                LOG_TRC("One run of COOLWSD completed");
-            }
+            coolwsd = new COOLWSD();
+            coolwsd->run(1, argv);
+            // We will actually not get here, Util::forcedExit() will be called
+            delete coolwsd;
+            coolwsd = nullptr;
+            LOG_TRC("COOLWSD completed");
         });
 
     {

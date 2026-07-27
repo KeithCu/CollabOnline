@@ -30,6 +30,7 @@ $(eval $(call gb_Helper_register_executables,NONE, \
     ) \
 	bestreversemap \
 	cfgex \
+	cofficeotron \
 	concat-deps \
 	cpp \
 	cppunittester \
@@ -180,37 +181,6 @@ $(eval $(call gb_Helper_register_executables_for_install,OOO,ooo, \
 	) \
 ))
 
-$(eval $(call gb_Helper_register_executables_for_install,OOO,calc_brand, \
-	$(if $(filter WNT,$(OS)), \
-		scalc \
-	) \
-))
-
-$(eval $(call gb_Helper_register_executables_for_install,OOO,draw_brand, \
-	$(if $(filter WNT,$(OS)), \
-		sdraw \
-	) \
-))
-
-$(eval $(call gb_Helper_register_executables_for_install,OOO,impress_brand, \
-	$(if $(filter WNT,$(OS)), \
-		simpress \
-	) \
-))
-
-$(eval $(call gb_Helper_register_executables_for_install,OOO,math_brand, \
-	$(if $(filter WNT,$(OS)), \
-		smath \
-	) \
-))
-
-$(eval $(call gb_Helper_register_executables_for_install,OOO,writer_brand, \
-	$(if $(filter WNT,$(OS)), \
-		sweb \
-		swriter \
-	) \
-))
-
 $(eval $(call gb_Helper_register_executables_for_install,OOO,ooo, \
 	gengal \
 	$(if $(filter WNT,$(OS)),,uri-encode) \
@@ -279,7 +249,6 @@ $(eval $(call gb_Helper_register_libraries_for_install,OOOLIBS,gnome, \
 
 $(eval $(call gb_Helper_register_plugins_for_install,OOOLIBS,gnome, \
     $(if $(ENABLE_GTK3),vclplug_gtk3) \
-    $(if $(ENABLE_GTK4),vclplug_gtk4) \
 ))
 
 $(eval $(call gb_Helper_register_libraries_for_install,OOOLIBS,math, \
@@ -296,7 +265,6 @@ endif
 ifneq ($(ENABLE_WASM_STRIP_CANVAS),TRUE)
 $(eval $(call gb_Helper_register_libraries_for_install,OOOLIBS,ooo, \
 	canvastools \
-	canvasfactory \
 	cppcanvas \
 	vclcanvas \
 ))
@@ -377,7 +345,6 @@ $(eval $(call gb_Helper_register_libraries_for_install,OOOLIBS,ooo, \
 	$(call gb_Helper_optional,DBCONNECTIVITY,mozbootstrap) \
 	msfilter \
 	$(call gb_Helper_optional,SCRIPTING,msforms) \
-	mtfrenderer \
 	numbertext \
 	$(call gb_Helper_optional,DBCONNECTIVITY,odbc) \
 	odfflatxml \
@@ -883,28 +850,6 @@ $(eval $(call gb_Helper_register_packages_for_install,brand,\
 	readlicense_oo_license \
 	$(call gb_Helper_optional,DESKTOP,setup_native_packinfo) \
 ))
-
-ifeq ($(USING_X11), TRUE)
-$(eval $(call gb_Helper_register_packages_for_install,calc_brand,\
-	desktop_scalc_sh \
-))
-
-$(eval $(call gb_Helper_register_packages_for_install,draw_brand,\
-	desktop_sdraw_sh \
-))
-
-$(eval $(call gb_Helper_register_packages_for_install,impress_brand,\
-	desktop_simpress_sh \
-))
-
-$(eval $(call gb_Helper_register_packages_for_install,math_brand,\
-	desktop_smath_sh \
-))
-
-$(eval $(call gb_Helper_register_packages_for_install,writer_brand,\
-	desktop_swriter_sh \
-))
-endif # USING_X11=TRUE
 
 ifneq ($(DISABLE_PYTHON),TRUE)
 $(eval $(call gb_Helper_register_packages_for_install,python, \

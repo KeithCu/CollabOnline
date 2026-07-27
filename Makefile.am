@@ -9,10 +9,15 @@
 #
 ETAGS=ctags -e
 
-# Default to one make job per CPU. An explicit -j on the command line
-# wins. On platforms without nproc leave MAKEFLAGS alone.
-NPROC := $(if $(findstring j,$(MAKEFLAGS)),,$(shell nproc 2>/dev/null))
-MAKEFLAGS := $(MAKEFLAGS) $(if $(NPROC),-j$(NPROC))
+# Default to one make job per CPU, plus a load-average limit of the same
+# number so make does not pile on new jobs while the machine is already busy.
+# On a host shared by several builds each one backs off instead of all running
+# a full set of jobs at once. An explicit -j or -l wins. Without nproc, no
+# change.
+NPROC := $(shell nproc 2>/dev/null)
+MAKEFLAGS := $(MAKEFLAGS) \
+	$(if $(findstring j,$(MAKEFLAGS)),,$(if $(NPROC),-j$(NPROC))) \
+	$(if $(findstring l,$(MAKEFLAGS)),,$(if $(NPROC),-l$(NPROC)))
 
 build-samples:
 	$(QUIET_MKDIRP) mkdir -p $(abs_top_builddir)/test/samples
@@ -267,6 +272,7 @@ noinst_PROGRAMS =
 else
 noinst_PROGRAMS = \
                   clientnb \
+                  coconvert \
                   connect \
                   coolbench \
                   coolmap \
@@ -398,6 +404,10 @@ coolbench_SOURCES = \
 coolbench_LDADD = libsimd.a libglobals.a $(LDADD)
 
 coolconvert_SOURCES = tools/Tool.cpp
+
+# coconvert converts documents in-process: it loads the engine libraries
+# through the COKit header instead of talking to a running server.
+coconvert_SOURCES = tools/coconvert.cpp
 
 coolstress_TDOC_CPPFLAGS = -DTDOC=\"$(abs_top_srcdir)/test/data\"
 coolstress_CPPFLAGS = ${coolstress_TDOC_CPPFLAGS} ${include_paths} \
@@ -913,6 +923,7 @@ all_compiled_sources = $(sort \
 	$(coolsocketdump_SOURCES) \
 	$(coolbench_SOURCES) \
 	$(coolconvert_SOURCES) \
+	$(coconvert_SOURCES) \
 	$(coolmount_SOURCES) \
 	$(coolmap_SOURCES) \
 	$(clientnb_SOURCES) \
@@ -979,8 +990,8 @@ clean-clangd:
 clean-vscode: clean-clangd
 	cd $(abs_srcdir) && rm -rf .vscode
 
-browser/node_modules: browser/package.json browser/node_shrinkpack
-	@cd browser && UV_USE_IO_URING=0 npm ci --offline
+browser/node_modules: browser/package.json browser/npm-shrinkwrap.json browser/node_shrinkpack
+	@cd browser && cp npm-shrinkwrap.json package-lock.json && UV_USE_IO_URING=0 npm ci --offline
 
 eslint: browser/node_modules
 	@$(MAKE) -C browser eslint

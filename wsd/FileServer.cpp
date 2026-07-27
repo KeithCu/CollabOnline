@@ -39,6 +39,7 @@
 #include <net/HttpHelper.hpp>
 #endif
 #include <wopi/StorageConnectionManager.hpp>
+#include <wsd/AIUtil.hpp>
 #include <wsd/Auth.hpp>
 #include <wsd/COOLWSD.hpp>
 #include <wsd/HostUtil.hpp>
@@ -280,18 +281,6 @@ std::string stringifyBoolFromConfig(const Poco::Util::LayeredConfiguration& conf
                                     const std::string& propertyName, bool defaultValue)
 {
     return config.getBool(propertyName, defaultValue) ? "true" : "false";
-}
-
-/// Returns the canonical base url for a pre-canned AI provider id, or an
-/// empty view if the id is not pre-canned. Keep in sync with AI_PROVIDERS in
-/// browser/admin/src/integrator/AdminIntegratorSettings.ts.
-std::string_view preCannedAIProviderBaseUrl(std::string_view id)
-{
-    if (id == "openai")   return "https://api.openai.com";
-    if (id == "groq")     return "https://api.groq.com/openai";
-    if (id == "together") return "https://api.together.xyz";
-    if (id == "mistral")  return "https://api.mistral.ai";
-    return {};
 }
 
 /// Returns true if the host is allowed, false otherwise.
@@ -1612,6 +1601,19 @@ FileServerRequestHandler::ResourceAccessDetails FileServerRequestHandler::prepro
         uiRtlSettings = " dir=\"rtl\" ";
     Poco::replaceInPlace(preprocess, std::string("%UI_RTL_SETTINGS%"), uiRtlSettings);
 
+    // Apply the darkTheme query parameter server-side, rather than with an inline
+    // <script> that the Content-Security-Policy forbids, so that the loading screen
+    // already renders in dark mode. cool.html.m4 provides the %DARK_THEME_ATTR%
+    // attribute on <html> and the %DARK_THEME_CSS% placeholder in <head>.
+    const bool darkTheme = requestDetails.getParam("darkTheme") == "true";
+    Poco::replaceInPlace(preprocess, std::string("%DARK_THEME_ATTR%"),
+                         darkTheme ? std::string(" data-theme=\"dark\"") : std::string());
+    Poco::replaceInPlace(preprocess, std::string("<!--%DARK_THEME_CSS%-->"),
+                         darkTheme ? "<link rel=\"stylesheet\" href=\"" + responseRoot +
+                                         "/browser/" + Util::getCoolVersionHash() +
+                                         "/color-palette-dark.css\" />"
+                                   : std::string());
+
     std::string enableMacrosExecution = stringifyBoolFromConfig(config, "security.enable_macros_execution", false);
     Poco::replaceInPlace(preprocess, std::string("%ENABLE_MACROS_EXECUTION%"), enableMacrosExecution);
 
@@ -2268,7 +2270,7 @@ void FileServerRequestHandler::fetchModels(const Poco::Net::HTTPRequest& request
     const bool isCustom = provider == "custom";
     if (!isCustom)
     {
-        const std::string_view preCanned = preCannedAIProviderBaseUrl(provider);
+        const std::string_view preCanned = AIUtil::preCannedAIProviderBaseUrl(provider);
         if (preCanned.empty())
         {
             sendError(http::StatusCode::BadRequest, getRequestPath(request), socket, shortMessage,
@@ -2284,13 +2286,15 @@ void FileServerRequestHandler::fetchModels(const Poco::Net::HTTPRequest& request
         return;
     }
 
-    if (baseUrl.back() == '/')
-        baseUrl.pop_back();
+    baseUrl = AIUtil::normalizeAIBaseUrl(baseUrl);
     baseUrl += "/v1/models";
 
     Poco::URI uri(baseUrl);
 
-    if (isCustom && HostUtil::isForbiddenKitHost(uri.getHost()))
+    // A built-in provider's host is a fixed public endpoint and is always
+    // allowed; only a custom host goes through the net.lok_allow allowlist.
+    if (!AIUtil::isPreCannedAIProviderHost(uri.getHost()) &&
+        HostUtil::isForbiddenKitHost(uri.getHost()))
     {
         LOG_WRN("Rejected fetch-models request to host not in KIT allowlist ["
                 << Anonymizer::anonymizeUrl(baseUrl) << ']');
@@ -2674,7 +2678,8 @@ void FileServerRequestHandler::handleViewSettingUpload(
     storedRequest.set("Content-Type", "text/plain");
 
     http::Session::FinishedCallback storedCallback =
-        [uploadedBody, postBody, storedUriAnonym, requestPath, shortMessage,
+        [uploadedBody = std::move(uploadedBody), postBody = std::move(postBody), storedUriAnonym,
+         requestPath, shortMessage,
          socketWeak](const std::shared_ptr<http::Session>& wopiSession)
     {
         std::shared_ptr<StreamSocket> destSocket = socketWeak.lock();

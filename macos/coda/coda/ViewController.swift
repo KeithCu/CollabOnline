@@ -189,7 +189,6 @@ class ViewController: NSViewController, WKScriptMessageHandlerWithReply, WKNavig
         // Setup jsHandler as the entry point to call back from JavaScript
         let contentController = WKUserContentController()
         contentController.addScriptMessageHandler(self, contentWorld: .page, name: "lok")
-        contentController.addScriptMessageHandler(self, contentWorld: .page, name: "clipboard")
         ViewController.addDiagnosticMessageHandlers(to: contentController, handler: self)
 
         let config = WKWebViewConfiguration()
@@ -300,21 +299,6 @@ class ViewController: NSViewController, WKScriptMessageHandlerWithReply, WKNavig
 
         switch message.name {
 
-        case "clipboard":
-            if let body = message.body as? String {
-                switch body {
-
-                case let s where s.hasPrefix("sendToInternal "):
-                    if !COWrapper.sendToInternalClipboard(document, content: String(s.dropFirst("sendToInternal ".count))) {
-                        COWrapper.LOG_ERR("set clipboard returned failure");
-                        return (nil, "set clipboard returned failure");
-                    }
-
-                default:
-                    COWrapper.LOG_ERR("Invalid clipboard action \(body)")
-                }
-            }
-
         case "lok":
             if let body = message.body as? String {
                 COWrapper.LOG_DBG("To Online: '\(message.body)'")
@@ -357,21 +341,11 @@ class ViewController: NSViewController, WKScriptMessageHandlerWithReply, WKNavig
                     }
                 }
                 else if body.hasPrefix("COMMANDRESULT ") {
-                    if let brace = body.firstIndex(of: "{") {
-                        // substring that shares storage with the original string
-                        let jsonSlice = body[brace...]
-
-                        // convert directly to Data and decode.
-                        let data = Data(jsonSlice.utf8)
-                        do {
-                            let result = try JSONDecoder().decode(CommandResult.self, from: data)
-
-                            // Was it a successful save?
-                            if result.commandName == ".uno:Save" && result.success == true && result.wasModified == true {
-                                document.triggerSave()
-                            }
-                        } catch {}
-                    }
+                    // Command results are already handled in the Document's
+                    // handleUnoCommandResult(), straight from the engine's message
+                    // stream, so the page's echo of them carries nothing new.
+                    // Swallowing it here keeps it from being forwarded back to the
+                    // engine as a client message.
                 }
                 else if body == "PRINT" {
                     document.printDocument(self)

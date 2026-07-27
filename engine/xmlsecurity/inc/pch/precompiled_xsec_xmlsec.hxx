@@ -68,9 +68,9 @@
 #include <cpo/uno/Sequence.h>
 #include <cpo/uno/Sequence.hxx>
 #include <cpo/uno/Type.h>
-#include <com/sun/star/uno/TypeClass.hdl>
+#include <cpo/uno/TypeClass.hdl>
 #include <com/sun/star/uno/XWeak.hpp>
-#include <com/sun/star/uno/genfunc.h>
+#include <cpo/uno/genfunc.h>
 #include <com/sun/star/util/XCloneable.hpp>
 #include <com/sun/star/xml/csax/XCompressedDocumentHandler.hpp>
 #include <com/sun/star/xml/csax/XMLAttribute.hpp>

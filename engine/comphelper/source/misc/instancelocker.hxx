@@ -55,17 +55,17 @@ public:
     virtual ~OInstanceLocker() override;
 
 // XComponent
-    virtual void SAL_CALL dispose() override;
-    virtual void SAL_CALL addEventListener( const css::uno::Reference< css::lang::XEventListener >& xListener ) override;
-    virtual void SAL_CALL removeEventListener( const css::uno::Reference< css::lang::XEventListener >& aListener ) override;
+    virtual void dispose() override;
+    virtual void addEventListener( const css::uno::Reference< css::lang::XEventListener >& xListener ) override;
+    virtual void removeEventListener( const css::uno::Reference< css::lang::XEventListener >& aListener ) override;
 
 // XInitialization
-    virtual void SAL_CALL initialize( const cpo::uno::Sequence< cpo::uno::Any >& aArguments ) override;
+    virtual void initialize( const cpo::uno::Sequence< cpo::uno::Any >& aArguments ) override;
 
 // XServiceInfo
-    virtual OUString SAL_CALL getImplementationName(  ) override;
-    virtual bool SAL_CALL supportsService( const OUString& ServiceName ) override;
-    virtual cpo::uno::Sequence< OUString > SAL_CALL getSupportedServiceNames(  ) override;
+    virtual OUString getImplementationName(  ) override;
+    virtual bool supportsService( const OUString& ServiceName ) override;
+    virtual cpo::uno::Sequence< OUString > getSupportedServiceNames(  ) override;
 
 };
 
@@ -77,7 +77,7 @@ class OLockListener : public ::cppu::WeakImplHelper< css::util::XCloseListener,
     css::uno::Reference< css::uno::XInterface > m_xInstance;
     css::uno::Reference< css::embed::XActionsApproval > m_xApproval;
 
-    css::uno::WeakReference< css::lang::XComponent > m_xWrapper;
+    cpo::uno::WeakReference< css::lang::XComponent > m_xWrapper;
 
     bool m_bDisposed;
     bool m_bInitialized;
@@ -85,7 +85,7 @@ class OLockListener : public ::cppu::WeakImplHelper< css::util::XCloseListener,
     sal_Int32 m_nMode;
 
 public:
-    OLockListener(  css::uno::WeakReference< css::lang::XComponent > xWrapper,
+    OLockListener(  cpo::uno::WeakReference< css::lang::XComponent > xWrapper,
                     css::uno::Reference< css::uno::XInterface > xInstance,
                     sal_Int32 nMode,
                     css::uno::Reference< css::embed::XActionsApproval > xApproval );
@@ -96,15 +96,15 @@ public:
     void Dispose();
 
 // XEventListener
-    virtual void SAL_CALL disposing( const css::lang::EventObject& Source ) override;
+    virtual void disposing( const css::lang::EventObject& Source ) override;
 
 // XCloseListener
-    virtual void SAL_CALL queryClosing( const css::lang::EventObject& Source, bool GetsOwnership ) override;
-    virtual void SAL_CALL notifyClosing( const css::lang::EventObject& Source ) override;
+    virtual void queryClosing( const css::lang::EventObject& Source, bool GetsOwnership ) override;
+    virtual void notifyClosing( const css::lang::EventObject& Source ) override;
 
 // XTerminateListener
-    virtual void SAL_CALL queryTermination( const css::lang::EventObject& Event ) override;
-    virtual void SAL_CALL notifyTermination( const css::lang::EventObject& Event ) override;
+    virtual void queryTermination( const css::lang::EventObject& Event ) override;
+    virtual void notifyTermination( const css::lang::EventObject& Event ) override;
 
 };
 

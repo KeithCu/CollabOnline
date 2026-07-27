@@ -8777,24 +8777,6 @@ module com {
      interface ::com::sun::star::lang::XComponent;
      interface ::com::sun::star::lang::XServiceDisplayName;
     };
-    /** @deprecated */ published interface XDictionary1 {
-     interface ::com::sun::star::container::XNamed;
-     ::com::sun::star::linguistic2::DictionaryType getDictionaryType();
-     void setActive([in] boolean bActivate);
-     boolean isActive();
-     short getCount();
-     short getLanguage();
-     void setLanguage([in] short nLang);
-     ::com::sun::star::linguistic2::XDictionaryEntry getEntry([in] string aWord);
-     boolean addEntry([in] ::com::sun::star::linguistic2::XDictionaryEntry xDicEntry);
-     boolean add([in] string aWord, [in] boolean bIsNegative, [in] string aRplcText);
-     boolean remove([in] string aWord);
-     boolean isFull();
-     sequence< ::com::sun::star::linguistic2::XDictionaryEntry > getEntries();
-     void clear();
-     boolean addDictionaryEventListener([in] ::com::sun::star::linguistic2::XDictionaryEventListener xListener);
-     boolean removeDictionaryEventListener([in] ::com::sun::star::linguistic2::XDictionaryEventListener xListener);
-    };
     published interface XDictionaryEntry {
      interface ::com::sun::star::uno::XInterface;
      string getDictionaryWord();
@@ -9931,60 +9913,11 @@ module com {
      interface ::com::sun::star::frame::XDispatchProvider;
      [optional] interface ::com::sun::star::ui::XContextMenuInterception;
     };
-    published interface XDatabaseAccessListener;
-    /** @deprecated */ published interface XDatabaseAccess {
-     interface ::com::sun::star::sdbc::XDataSource;
-     boolean hasConnections();
-     ::com::sun::star::sdbc::XConnection getIsolatedConnection([in] string user, [in] string password) raises (::com::sun::star::sdbc::SQLException);
-     boolean suspendConnections() raises (::com::sun::star::sdbc::SQLException);
-     void addDatabaseAccessListener([in] ::com::sun::star::sdb::XDatabaseAccessListener listener);
-     void removeDatabaseAccessListener([in] ::com::sun::star::sdb::XDatabaseAccessListener listener);
-    };
-    /** @deprecated */ published service DatabaseAccess {
-     interface ::com::sun::star::beans::XPropertySet;
-     interface ::com::sun::star::sdb::XDatabaseAccess;
-     [optional] interface ::com::sun::star::sdb::XCompletedConnection;
-     [property, readonly] string URL;
-     [property] string Title;
-     [property] string ConnectURL;
-     [property] sequence< ::com::sun::star::beans::PropertyValue > ConnectInfo;
-     [property, readonly] boolean IsReadOnly;
-     [property] ::com::sun::star::util::XNumberFormatsSupplier NumberFormatsSupplier;
-     [property, optional] boolean IsPasswordRequired;
-     [property, optional] sequence< string > TableFilter;
-     [property, optional] sequence< string > TableTypeFilter;
-    };
-    /** @deprecated */ published service DatabaseAccessConnection {
-     service ::com::sun::star::sdbc::Connection;
-     service ::com::sun::star::sdbcx::DatabaseDefinition;
-     interface ::com::sun::star::container::XChild;
-     interface ::com::sun::star::sdb::XSQLQueryComposerFactory;
-     interface ::com::sun::star::sdb::XQueriesSupplier;
-    };
    };
    module util {
     published struct AliasProgrammaticPair {
      string Alias;
      string ProgrammaticName;
-    };
-    published interface XLocalizedAliases {
-     interface ::com::sun::star::uno::XInterface;
-     void bindAlias([in] string programmaticName, [in] ::com::sun::star::lang::Locale locale, [in] string alias) raises (::com::sun::star::container::ElementExistException);
-     void unbindAlias([in] ::com::sun::star::lang::Locale locale, [in] string alias) raises (::com::sun::star::container::NoSuchElementException);
-     string lookupAlias([in] ::com::sun::star::lang::Locale locale, [in] string Alias) raises (::com::sun::star::container::NoSuchElementException);
-     string lookupProgrammatic([in] ::com::sun::star::lang::Locale locale, [in] string programmatic) raises (::com::sun::star::container::NoSuchElementException);
-     void unbindAliases([in] string programmaticName) raises (::com::sun::star::container::NoSuchElementException);
-     void rebindAliases([in] string currentProgrammatic, [in] string newProgrammatic) raises (::com::sun::star::container::NoSuchElementException, ::com::sun::star::container::ElementExistException);
-     void renameAlias([in] ::com::sun::star::lang::Locale locale, [in] string oldName, [in] string aNewName) raises (::com::sun::star::container::NoSuchElementException, ::com::sun::star::container::ElementExistException);
-     sequence< ::com::sun::star::util::AliasProgrammaticPair > listAliases([in] ::com::sun::star::lang::Locale locale);
-    };
-   };
-   module sdb {
-    /** @deprecated */ published service DatabaseAccessContext {
-     interface ::com::sun::star::container::XEnumerationAccess;
-     interface ::com::sun::star::container::XNameAccess;
-     interface ::com::sun::star::util::XLocalizedAliases;
-     interface ::com::sun::star::lang::XLocalizable;
     };
    };
    module ucb {
@@ -9995,13 +9928,6 @@ module com {
     };
    };
    module sdb {
-    /** @deprecated */ published service DatabaseAccessDataSource {
-     interface ::com::sun::star::beans::XPropertySet;
-     interface ::com::sun::star::sdbc::XDataSource;
-     [optional] interface ::com::sun::star::sdb::XCompletedConnection;
-     [property] string URL;
-     [property, optional] ::com::sun::star::ucb::RememberAuthentication PasswordMode;
-    };
     published interface XDatabaseRegistrationsListener;
     published interface XDatabaseRegistrations {
      interface ::com::sun::star::uno::XInterface;
@@ -10018,7 +9944,7 @@ module com {
     published interface XDatabaseContext {
      interface ::com::sun::star::container::XEnumerationAccess;
      interface ::com::sun::star::container::XNameAccess;
-     interface ::com::sun::star::uno::XNamingService;
+     interface ::cpo::uno::XNamingService;
      interface ::com::sun::star::container::XContainer;
      interface ::com::sun::star::lang::XSingleServiceFactory;
      interface ::com::sun::star::sdb::XDatabaseRegistrations;
@@ -10042,16 +9968,6 @@ module com {
     };
    };
    module sdb {
-    /** @deprecated */ published interface XDatabaseEnvironment {
-     interface ::com::sun::star::sdbc::XDriverManager;
-     ::com::sun::star::sdb::XDatabaseAccess getDatabaseAccess([in] string URL) raises (::com::sun::star::sdbc::SQLException);
-     ::com::sun::star::sdb::XDatabaseAccess createDatabaseAccess([in] string URL, [in] string title) raises (::com::sun::star::sdbc::SQLException);
-    };
-    /** @deprecated */ published service DatabaseEnvironment {
-     interface ::com::sun::star::sdb::XDatabaseEnvironment;
-     interface ::com::sun::star::beans::XPropertySet;
-     [property, readonly] ::com::sun::star::util::XNumberFormatsSupplier NumberFormatsSupplier;
-    };
     published struct DatabaseRegistrationEvent: ::com::sun::star::lang::EventObject {
      string Name;
      string OldLocation;
@@ -10280,12 +10196,6 @@ module com {
      interface ::com::sun::star::uno::XInterface;
      void alterCommand([in] string command, [in] boolean useEscapeProcessing) raises (::com::sun::star::sdbc::SQLException);
     };
-    /** @deprecated */ published interface XDatabaseAccessListener {
-     interface ::com::sun::star::lang::XEventListener;
-     void connectionChanged([in] ::com::sun::star::lang::EventObject event);
-     boolean approveConnectionClosing([in] ::com::sun::star::lang::EventObject event);
-     void connectionClosing([in] ::com::sun::star::lang::EventObject event);
-    };
     published interface XDatabaseRegistrationsListener {
      interface ::com::sun::star::lang::XEventListener;
      void registeredDatabaseLocation([in] ::com::sun::star::sdb::DatabaseRegistrationEvent Event);
@@ -10325,16 +10235,6 @@ module com {
      const long NOT_PSEUDO = 1;
      const long PSEUDO = 2;
      const long UNKNOWN = 0;
-    };
-    /** @deprecated */ published constants ChangeAction {
-     const long DELETE = 3;
-     const long INSERT = 1;
-     const long UNDO = 4;
-     const long UPDATE = 2;
-    };
-    /** @deprecated */ published struct ChangeEvent: ::com::sun::star::lang::EventObject {
-     long Action;
-     long Rows;
     };
     published constants ColumnSearch {
      const long BASIC = 2;
@@ -12999,10 +12899,6 @@ module com {
      interface ::com::sun::star::lang::XEventListener;
      void activeSpreadsheetChanged([in] ::com::sun::star::sheet::ActivationEvent aEvent);
     };
-    /** @deprecated */ published interface XFillAcrossSheet {
-     interface ::com::sun::star::uno::XInterface;
-     void fillAcrossSheets([in] long nContentFlags);
-    };
     published interface XRangeSelectionChangeListener {
      interface ::com::sun::star::lang::XEventListener;
      void descriptorChanged([in] ::com::sun::star::sheet::RangeSelectionEvent aEvent);
@@ -13015,16 +12911,6 @@ module com {
     published interface XResultListener {
      interface ::com::sun::star::lang::XEventListener;
      void modified([in] ::com::sun::star::sheet::ResultEvent aEvent);
-    };
-    /** @deprecated */ published interface XSheetPastable {
-     interface ::com::sun::star::uno::XInterface;
-     void paste([in] ::com::sun::star::table::CellAddress aDestination);
-     void pasteFormat([in] ::com::sun::star::table::CellAddress aDestination, [in] string aFormat);
-     void pasteCellRange([in] ::com::sun::star::table::CellRangeAddress aDestination, [in] ::com::sun::star::sheet::PasteOperation nOperation, [in] short nContents, [in] boolean bSkipEmpty, [in] boolean bTranspose, [in] boolean bAsLink, [in] ::com::sun::star::sheet::CellInsertMode nInsert);
-    };
-    /** @deprecated */ published interface XViewPanesSupplier {
-     interface ::com::sun::star::uno::XInterface;
-     ::com::sun::star::container::XIndexAccess getViewPanes();
     };
    };
    module style {
@@ -13213,12 +13099,6 @@ module com {
     };
    };
    module svg {
-    /** @deprecated */ published interface XSVGPrinter {
-     interface ::com::sun::star::uno::XInterface;
-     boolean startJob([in] ::com::sun::star::xml::sax::XDocumentHandler aHandler, [in] sequence< byte > aJobSetup, [in] string aJobName, [in] unsigned long nCopies, [in] boolean bCollate);
-     void printPage([in] sequence< byte > aPrintPage);
-     void endJob();
-    };
     /** @deprecated */ published interface XSVGWriter {
      interface ::com::sun::star::uno::XInterface;
      void write([in] ::com::sun::star::xml::sax::XDocumentHandler aHandler, [in] sequence< byte > aMtf);
@@ -15669,13 +15549,6 @@ module com {
     published constants ContentResultSetCapability {
      const short SORTED = 1;
     };
-    /** @deprecated */ published interface XContentTransmitter {
-     interface ::com::sun::star::uno::XInterface;
-     void transmit([in] string Source, [in] string Destination, [in] long Flags);
-    };
-    /** @deprecated */ published service ContentTransmitter {
-     interface ::com::sun::star::ucb::XContentTransmitter;
-    };
     published struct CrossReference {
      string Group;
      long Id;
@@ -15960,9 +15833,6 @@ module com {
      sequence< any > Arguments;
     };
     published exception InteractiveBadTransferURLException: ::com::sun::star::uno::Exception {
-    };
-    /** @deprecated */ published exception InteractiveFileIOException: ::com::sun::star::ucb::InteractiveIOException {
-     string FileName;
     };
     published exception InteractiveNetworkException: ::com::sun::star::task::ClassifiedInteractionRequest {
     };

@@ -48,11 +48,11 @@ public:
 
 protected:
     // ____ XSelectionChangeListener ____
-    virtual void SAL_CALL selectionChanged(
+    virtual void selectionChanged(
         const css::lang::EventObject& aEvent ) override;
 
     // ____ XEventListener (base of all listeners) ____
-    virtual void SAL_CALL disposing(
+    virtual void disposing(
         const css::lang::EventObject& Source ) override
     {
         css::uno::Reference< css::view::XSelectionChangeListener > xEventListener( m_xListener );
@@ -61,7 +61,7 @@ protected:
     }
 
 private:
-    css::uno::WeakReference< css::view::XSelectionChangeListener > m_xListener;
+    cpo::uno::WeakReference< css::view::XSelectionChangeListener > m_xListener;
 };
 
 } //  namespace chart

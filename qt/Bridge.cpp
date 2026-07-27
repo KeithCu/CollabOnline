@@ -34,6 +34,8 @@
 #include <Poco/URI.h>
 
 #include <cstdlib>
+#include <map>
+#include <mutex>
 
 #include <QApplication>
 #include <QByteArray>
@@ -46,6 +48,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMainWindow>
+#include <QMessageBox>
 #include <QMetaObject>
 #include <QObject>
 #include <QPointer>
@@ -73,9 +76,59 @@ namespace
             });
         }
     }
+
+    std::mutex BridgeRegistryMutex;
+    std::map<unsigned, Bridge*> BridgeRegistry;
 } // namespace
 
+void coda::registerBridge(unsigned appDocId, Bridge* bridge)
+{
+    if (appDocId == 0)
+        return;
+    std::lock_guard<std::mutex> lock(BridgeRegistryMutex);
+    BridgeRegistry[appDocId] = bridge;
+}
+
+void coda::unregisterBridge(Bridge* bridge)
+{
+    std::lock_guard<std::mutex> lock(BridgeRegistryMutex);
+    for (auto it = BridgeRegistry.begin(); it != BridgeRegistry.end();)
+    {
+        if (it->second == bridge)
+            it = BridgeRegistry.erase(it);
+        else
+            ++it;
+    }
+}
+
+bool coda::invokeOnBridge(unsigned appDocId, std::function<void(Bridge&)> fn)
+{
+    // The lock is held across the queued post: a bridge being destroyed on
+    // the GUI thread first waits here in unregisterBridge, and a call
+    // queued before the destruction is discarded with the QObject.
+    std::lock_guard<std::mutex> lock(BridgeRegistryMutex);
+    const auto it = BridgeRegistry.find(appDocId);
+    if (it == BridgeRegistry.end())
+        return false;
+    Bridge* bridge = it->second;
+    QMetaObject::invokeMethod(
+        bridge, [bridge, fn = std::move(fn)] { fn(*bridge); }, Qt::QueuedConnection);
+    return true;
+}
+
+Bridge::Bridge(QObject* parent, coda::DocumentData& document, QWidget* window,
+               QWebEngineView* webView)
+    : QObject(parent)
+    , _document(document)
+    , _window(window)
+    , _webView(webView)
+    , _closeNotificationPipeForForwardingThread{ -1, -1 }
+{
+    coda::registerBridge(_document._appDocId, this);
+}
+
 Bridge::~Bridge() {
+    coda::unregisterBridge(this);
     if (_document._fakeClientFd != -1) {
         fakeSocketClose(_document._fakeClientFd);
     }
@@ -247,6 +300,43 @@ void Bridge::closeSnackbar()
 {
     evalJS("if (window.app && window.app.map && window.app.map.uiManager) "
            "window.app.map.uiManager.closeSnackbar();");
+}
+
+void Bridge::onPrintExportReady(const QString& pdfPath)
+{
+    closeSnackbar();
+    showPrintDialog(pdfPath.toStdString(), _webView);
+}
+
+void Bridge::onSaveExportReady(const QString& filePath)
+{
+    closeSnackbar();
+
+    const QFileInfo srcInfo(filePath);
+    const QString suggestedName = srcInfo.fileName();
+
+    QFileDialog* dialog = showSaveFileDialog(_webView, QObject::tr("Export As"), suggestedName,
+                                             filePath.toStdString(),
+                                             [self = QPointer<Bridge>(this)](bool ok)
+                                             {
+                                                 if (!ok && self)
+                                                     self->onExportFailed();
+                                             });
+
+    // The dialog deletes itself on close, whichever way it is dismissed;
+    // removing the exported file and its private temp directory on
+    // destruction covers saving, cancelling, and the dialog going down with
+    // its parent window.
+    QObject::connect(dialog, &QObject::destroyed,
+                     [filePath] { removeExportTempDirectory(filePath.toStdString()); });
+}
+
+void Bridge::onExportFailed()
+{
+    closeSnackbar();
+    if (_webView)
+        QMessageBox::warning(_webView, QObject::tr("Export Error"),
+                             QObject::tr("Failed to export the document."));
 }
 
 void Bridge::send2JS(const std::vector<char>& buffer)
@@ -437,7 +527,7 @@ void Bridge::promptSaveLocation(std::function<void(const std::string&, const std
                      });
 
     QObject::connect(dialog, &QFileDialog::fileSelected,
-                     [callback, dialog, formats](const QString& destPath)
+                     [callback, formats](const QString& destPath)
                      {
                          // The format is determined by file name not the
                          // file format dropdown menu. We can't change the
@@ -607,6 +697,8 @@ QVariant Bridge::cool(const QString& messageStr)
         _document._fakeClientFd = fakeSocketSocket();
         // Generate a new appDocId
         _document._appDocId = coda::generateNewAppDocId();
+        coda::unregisterBridge(this);
+        coda::registerBridge(_document._appDocId, this);
         // Update the file URL
         _document._fileURL = Poco::URI(newFileUrl);
 
@@ -937,7 +1029,7 @@ QVariant Bridge::cool(const QString& messageStr)
         dialog->setAttribute(Qt::WA_DeleteOnClose);
 
         QObject::connect(dialog, &QFileDialog::filesSelected,
-                         [](const QStringList& filePaths)
+                         [this](const QStringList& filePaths)
                          {
                              // Under flatpak the picker returns sandboxed document-portal paths,
                              // resolve the real host location for the recent-files list.
@@ -950,6 +1042,10 @@ QVariant Bridge::cool(const QString& messageStr)
                              coda::openFiles(filePaths, displayUris);
                              // Close starter screen if it exists
                              closeStarterScreen();
+
+                             // The picked document opens in its own window; return the
+                             // originating window to its document view.
+                             evalJS("window.app?.map?.backstageView?.returnToDocumentView();");
                          });
 
         dialog->open();
@@ -1000,76 +1096,10 @@ QVariant Bridge::cool(const QString& messageStr)
             _webView->window()->close();
         }
     }
-    else if (tokens.equals(0, "PRINT"))
-    {
-        printDocument(_document._appDocId, _webView);
-    }
     else if (tokens.equals(0, "EXCHANGEMONITORS"))
     {
         if (auto* coda = dynamic_cast<CODAWebEngineView*>(_webView))
             coda->exchangeMonitors();
-    }
-    else if (tokens.equals(0, "downloadas"))
-    {
-        // Parse "format=" argument and handle "direct-" prefix
-        std::string format;
-        if (!COOLProtocol::getTokenString(tokens, "format", format))
-        {
-            LOG_ERR("downloadas: no format= specified");
-            return {};
-        }
-        if (format.starts_with("direct-"))
-            format.erase(0, strlen("direct-"));
-
-        // Build a suggested filename from the current document
-        const QUrl docUrl(QString::fromStdString(_document._fileURL.toString()));
-        const QString docPath = docUrl.isLocalFile() ? docUrl.toLocalFile() : docUrl.toString();
-        const QFileInfo docInfo(docPath);
-        const QString baseName = docInfo.completeBaseName().isEmpty()
-                                 ? QStringLiteral("document")
-                                 : docInfo.completeBaseName();
-        const QString suggestedName = baseName + "." + QString::fromStdString(format);
-
-        // Ask the user for the destination
-        QFileDialog* dialog = new QFileDialog(
-            _webView,
-            QObject::tr("Export As"),
-            QDir::home().filePath(suggestedName),
-            QObject::tr("All Files (*)"));
-
-        dialog->setAcceptMode(QFileDialog::AcceptSave);
-        dialog->setAttribute(Qt::WA_DeleteOnClose);
-
-        unsigned appDocId = _document._appDocId;
-        QObject::connect(dialog, &QFileDialog::fileSelected,
-                        [appDocId, format](const QString& destPath) {
-            // Export directly to the chosen path
-            kit::Document* loKitDoc = DocumentData::get(appDocId).loKitDocument;
-            if (!loKitDoc)
-            {
-                LOG_ERR("downloadas: no loKitDocument");
-                return;
-            }
-
-            const QUrl destUrl = QUrl::fromLocalFile(destPath);
-            const QByteArray urlUtf8 =
-                    destUrl.toString(QUrl::FullyEncoded | QUrl::PreferLocalFile).toUtf8();
-            const QByteArray fmtUtf8 = QString::fromStdString(format).toUtf8();
-
-            loKitDoc->saveAs(urlUtf8.constData(), fmtUtf8.constData(), nullptr);
-
-            // Verify save
-            const QFileInfo outInfo(destPath);
-            if (!outInfo.exists() || outInfo.size() <= 0)
-            {
-                LOG_ERR("downloadas: failed to save to '" << destPath.toStdString() << "'");
-                return;
-            }
-
-            LOG_INF("downloadas: exported to " << destPath.toStdString());
-        });
-
-        dialog->open();
     }
     else if (tokens.equals(0, "exportfile"))
     {
@@ -1099,29 +1129,14 @@ QVariant Bridge::cool(const QString& messageStr)
             suggestedName = QStringLiteral("export.") + (ext.isEmpty() ? QStringLiteral("bin") : ext);
         }
 
-        QFileDialog* dialog = new QFileDialog(
-            _webView,
-            QObject::tr("Save File"),
-            QDir::home().filePath(suggestedName),
-            QObject::tr("All Files (*)"));
-
-        dialog->setAcceptMode(QFileDialog::AcceptSave);
-        dialog->setAttribute(Qt::WA_DeleteOnClose);
-
-        QObject::connect(dialog, &QFileDialog::fileSelected,
-                        [srcPath](const QString& destPath) {
-            if (QFile::exists(destPath))
-                QFile::remove(destPath);
-            if (!QFile::copy(srcPath, destPath))
-            {
-                LOG_ERR("exportfile: failed to copy to '" << destPath.toStdString() << "'");
-                return;
-            }
-            LOG_INF("exportfile: saved to " << destPath.toStdString());
-            QFile::remove(srcPath);
-        });
-
-        dialog->open();
+        showSaveFileDialog(_webView, QObject::tr("Save File"), suggestedName,
+                           srcPath.toStdString(),
+                           [srcPath](bool ok)
+                           {
+                               // The source stays behind on failure for another attempt.
+                               if (ok)
+                                   QFile::remove(srcPath);
+                           });
     }
     else if (tokens.equals(0, "HYPERLINK"))
     {

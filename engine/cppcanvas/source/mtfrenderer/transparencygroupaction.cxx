@@ -33,6 +33,7 @@
 #include <vcl/svapp.hxx>
 #include <vcl/virdev.hxx>
 #include <vcl/gdimtf.hxx>
+#include <vcl/canvastools.hxx>
 
 #include <basegfx/range/b2drange.hxx>
 #include <basegfx/point/b2dpoint.hxx>
@@ -47,7 +48,7 @@
 #include "transparencygroupaction.hxx"
 #include <outdevstate.hxx>
 #include "mtftools.hxx"
-#include <cppcanvas/vclfactory.hxx>
+#include <vclfactory.hxx>
 
 #if OSL_DEBUG_LEVEL > 2
 #include <vcl/canvastools.hxx>
@@ -55,7 +56,7 @@
 
 using namespace ::com::sun::star;
 
-namespace cppcanvas::internal
+namespace cppcanvas
 {
         // free support functions
         // ======================
@@ -166,8 +167,8 @@ namespace cppcanvas::internal
             bool TransparencyGroupAction::renderSubset( const ::basegfx::B2DHomMatrix&    rTransformation,
                                                         const Subset&                     rSubset ) const
             {
-                SAL_INFO( "cppcanvas.emf", "::cppcanvas::internal::TransparencyGroupAction::renderSubset()" );
-                SAL_INFO( "cppcanvas.emf", "::cppcanvas::internal::TransparencyGroupAction: 0x" << std::hex << this );
+                SAL_INFO( "cppcanvas.emf", "::cppcanvas::TransparencyGroupAction::renderSubset()" );
+                SAL_INFO( "cppcanvas.emf", "::cppcanvas::TransparencyGroupAction: 0x" << std::hex << this );
 
                 // determine overall transformation matrix (render, view,
                 // and passed transformation)
@@ -376,12 +377,9 @@ namespace cppcanvas::internal
 
 
                     // update buffered bitmap and transformation
-                    BitmapSharedPtr aBmp( VCLFactory::createBitmap(
-                                              mpCanvas,
-                                              aVDev->GetBitmap(
+                    mxBufferBitmap =  vcl::unotools::xBitmapFromBitmap(aVDev->GetBitmap(
                                                   aBitmapPoint,
-                                                  aBitmapSizePixel ) ) );
-                    mxBufferBitmap = aBmp->getUNOBitmap();
+                                                  aBitmapSizePixel ) );
                     maLastTransformation = aTotalTransform;
                     maLastSubset = rSubset;
                 }
@@ -414,9 +412,9 @@ namespace cppcanvas::internal
                 {
                     // tdf#95709
                     // Adjust renderstate clip to modified scale from above
-                    ::basegfx::B2DPolyPolygon aClip = ::basegfx::unotools::b2DPolyPolygonFromXPolyPolygon2D(aLocalState.Clip);
+                    ::basegfx::B2DPolyPolygon aClip = ::canvastools::b2DPolyPolygonFromXPolyPolygon2D(aLocalState.Clip);
                     aClip.transform(basegfx::utils::createScaleB2DHomMatrix(aScale));
-                    aLocalState.Clip = ::basegfx::unotools::xPolyPolygonFromB2DPolyPolygon(mpCanvas->getUNOCanvas()->getDevice(), aClip);
+                    aLocalState.Clip = ::canvastools::xPolyPolygonFromB2DPolyPolygon(mpCanvas->getUNOCanvas()->getDevice(), aClip);
                 }
 
 #if OSL_DEBUG_LEVEL > 2

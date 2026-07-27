@@ -18,10 +18,9 @@
 
 #include <common/FileUtil.hpp>
 #include <common/Log.hpp>
-#include <common/MobileApp.hpp>
 
-#include <Poco/Path.h>
-#include <Poco/URI.h>
+#include <filesystem>
+#include <system_error>
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -78,29 +77,36 @@ std::vector<SaveAsFormat> getSaveAsFormats(int docType)
     return formats;
 }
 
-void printDocument(unsigned appDocId, QWidget* parent)
+void removeExportTempDirectory(const std::string& filePath)
 {
-    // Create a temporary PDF file for printing
-    const std::string tempFile = FileUtil::createRandomTmpDir() + "/print.pdf";
-    const std::string tempFileUri = Poco::URI(Poco::Path(tempFile)).toString();
+    std::error_code errorCode;
+    const std::string dir =
+        std::filesystem::weakly_canonical(std::filesystem::path(filePath).parent_path(), errorCode)
+            .string();
 
-    kit::Document* loKitDoc = DocumentData::get(appDocId).loKitDocument;
-    if (!loKitDoc)
+    std::string tempRoot = FileUtil::getSysTempDirectoryPath();
+    while (tempRoot.size() > 1 && tempRoot.back() == '/')
+        tempRoot.pop_back();
+
+    // Only a directory strictly inside the system temp directory is removed:
+    // exports save into a private directory created there, and any other
+    // path means the file path was mangled somewhere on the way.
+    if (errorCode || dir.size() <= tempRoot.size() + 1 ||
+        dir.compare(0, tempRoot.size(), tempRoot) != 0 || dir[tempRoot.size()] != '/')
     {
-        LOG_ERR("printDocument: no loKitDocument");
+        LOG_ERR("refusing to remove '" << dir << "': not inside the system temp directory '"
+                                       << tempRoot << "'");
         return;
     }
 
-    loKitDoc->saveAs(tempFileUri.c_str(), "pdf", nullptr);
+    FileUtil::removeFile(dir, /*recursive=*/true);
+}
 
-    // Verify the PDF was created
-    struct stat st;
-    if (FileUtil::getStatOfFile(tempFile, st) != 0)
-    {
-        LOG_ERR("printDocument: failed to create PDF file: " << tempFile);
-        return;
-    }
-
+// Shows the printer-selection dialog for an already-exported PDF file and
+// prints or copies it as the user chooses. Removes the file's private temp
+// directory when the dialog finishes.
+void showPrintDialog(const std::string& tempFile, QWidget* parent)
+{
     // Create a simple custom print dialog, qt's print dialog is overkill for now.
     QDialog* customPrintDialog = new QDialog(parent);
     customPrintDialog->setWindowTitle(QObject::tr("Print Document"));
@@ -174,16 +180,16 @@ void printDocument(unsigned appDocId, QWidget* parent)
         if (printToFileCheck->isChecked() && !filePathEdit->text().isEmpty())
         {
             QString outputFile = filePathEdit->text();
-            LOG_INF("printDocument: User selected print to file: " << outputFile.toStdString());
+            LOG_INF("showPrintDialog: User selected print to file: " << outputFile.toStdString());
 
-            if (FileUtil::copyAtomic(tempFile, outputFile.toStdString(), false))
+            if (moveOrCopyFile(tempFile, outputFile.toStdString()))
             {
-                LOG_INF(
-                    "printDocument: PDF successfully saved to file: " << outputFile.toStdString());
+                LOG_INF("showPrintDialog: PDF successfully saved to file: "
+                        << outputFile.toStdString());
             }
             else
             {
-                LOG_ERR("printDocument: Failed to copy PDF to file: " << outputFile.toStdString());
+                LOG_ERR("showPrintDialog: Failed to copy PDF to file: " << outputFile.toStdString());
                 QMessageBox::warning(parent, QObject::tr("Print to File Error"),
                                      QObject::tr("Failed to save document to file. Please check "
                                                  "the file path and permissions."));
@@ -227,7 +233,7 @@ void printDocument(unsigned appDocId, QWidget* parent)
                 if (result != 0)
                 {
                     LOG_ERR(
-                        "printDocument: failed to print PDF. Tried both 'lp' and 'lpr' commands");
+                        "showPrintDialog: failed to print PDF. Tried both 'lp' and 'lpr' commands");
                     QMessageBox::warning(
                         parent, QObject::tr("Print Error"),
                         QObject::tr(
@@ -235,30 +241,76 @@ void printDocument(unsigned appDocId, QWidget* parent)
                 }
                 else
                 {
-                    LOG_INF("printDocument: PDF sent to printer '" << printerName.toStdString()
-                                                                   << "' using 'lpr'");
+                    LOG_INF("showPrintDialog: PDF sent to printer '" << printerName.toStdString()
+                                                                     << "' using 'lpr'");
                 }
             }
             else
             {
-                LOG_INF("printDocument: PDF sent to printer '" << printerName.toStdString()
-                                                               << "' using 'lp'");
+                LOG_INF("showPrintDialog: PDF sent to printer '" << printerName.toStdString()
+                                                                 << "' using 'lp'");
             }
         }
-
-        // Clean up the temporary file
-        FileUtil::unlinkFile(tempFile);
     });
 
     // Connect cancel button
     QObject::connect(cancelButton, &QPushButton::clicked,
-                     [customPrintDialog, tempFile]() {
+                     [customPrintDialog]() {
         customPrintDialog->reject();
-        LOG_INF("printDocument: Print cancelled by user");
-        FileUtil::unlinkFile(tempFile);
+        LOG_INF("showPrintDialog: print cancelled by user");
     });
 
+    // The dialog deletes itself on close, whichever way it is dismissed;
+    // removing the PDF and its private temp directory on destruction covers
+    // both buttons, Escape, and the window closing with its parent. The
+    // deletion is queued, so the print handler above finishes with the file
+    // before the cleanup runs.
+    QObject::connect(customPrintDialog, &QObject::destroyed,
+                     [tempFile] { removeExportTempDirectory(tempFile); });
+
     customPrintDialog->open();
+}
+
+bool moveOrCopyFile(const std::string& fromPath, const std::string& toPath)
+{
+    // A rename moves the data without a second write and atomically replaces
+    // an existing destination, but only works within one filesystem; across
+    // filesystems it fails and the atomic copy takes over. Either way an
+    // existing destination file is replaced only once the new content is
+    // complete on disk.
+    std::error_code errorCode;
+    std::filesystem::rename(fromPath, toPath, errorCode);
+    if (!errorCode)
+        return true;
+
+    return FileUtil::copyAtomic(fromPath, toPath, /*preserveTimestamps=*/false);
+}
+
+QFileDialog* showSaveFileDialog(QWidget* parent, const QString& title,
+                                const QString& suggestedName, const std::string& srcPath,
+                                std::function<void(bool ok)> onFinished)
+{
+    QFileDialog* dialog = new QFileDialog(parent, title, QDir::home().filePath(suggestedName),
+                                          QObject::tr("All Files (*)"));
+
+    dialog->setAcceptMode(QFileDialog::AcceptSave);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+
+    QObject::connect(dialog, &QFileDialog::fileSelected,
+                     [srcPath, onFinished = std::move(onFinished)](const QString& destPath)
+                     {
+                         const bool ok = moveOrCopyFile(srcPath, destPath.toStdString());
+                         if (ok)
+                             LOG_INF("export: saved to " << destPath.toStdString());
+                         else
+                             LOG_ERR("export: failed to copy to '" << destPath.toStdString()
+                                                                   << "'");
+                         if (onFinished)
+                             onFinished(ok);
+                     });
+
+    dialog->open();
+    return dialog;
 }
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

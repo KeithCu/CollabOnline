@@ -1353,12 +1353,15 @@ window.L.CanvasTileLayer = window.L.Layer.extend({
 			const preview = this._map._docPreviews ? this._map._docPreviews[command.part] : null;
 			if (preview) { preview.invalid = true; }
 
-			// A vector-rendered view has no tiles. A whole-document EMPTY
-			// invalidation carries no part, so refresh every part;
-			// otherwise drop just the one that changed.
+			// A vector-rendered view has no tiles. A change inside a
+			// rectangle is delivered to this view as a pushed delta, so
+			// there is nothing to fetch for it. An invalidation without a
+			// rectangle (width covers everything) has no pushed delta and
+			// may be a structural change, so drop the cached part and
+			// re-fetch it in full. Without a part, drop every part.
 			if (isNaN(command.part))
 				RenderManager.clearAllParts();
-			else
+			else if (command.width === Number.MAX_SAFE_INTEGER)
 				RenderManager.clearCachedPart(command.part);
 
 			const topLeftTwips = new cool.Point(command.x, command.y);
@@ -2550,7 +2553,7 @@ window.L.CanvasTileLayer = window.L.Layer.extend({
 			return false; // Selection doesn't start at first row.
 
 		var rangeEnd = this._getNumberPart(startEnd[1]);
-		if (rangeEnd === 1048576) // Last row's number.
+		if (rangeEnd === app.calc.maxRowCount) // Last row's number.
 			return true;
 		else
 			return false;
@@ -2569,10 +2572,18 @@ window.L.CanvasTileLayer = window.L.Layer.extend({
 			return false; // Selection doesn't start at first column.
 
 		var rangeEnd = this._getStringPart(startEnd[1]);
-		if (rangeEnd === 'XFD') // Last column's code.
+		if (this._columnLabelToNumber(rangeEnd) === app.calc.maxColumnCount) // Last column.
 			return true;
 		else
 			return false;
+	},
+
+	// Converts a spreadsheet column label ('A', 'AA', 'XFD'...) to its 1-based number.
+	_columnLabelToNumber: function (label) {
+		var number = 0;
+		for (var i = 0; i < label.length; i++)
+			number = number * 26 + (label.charCodeAt(i) - 64); // 'A'.charCodeAt(0) === 65.
+		return number;
 	},
 
 	_updateScrollOnCellSelection: function (oldSelection, newSelection) {

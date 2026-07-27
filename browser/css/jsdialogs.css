@@ -624,12 +624,6 @@ body button:not(.ui-corner-all):not(.button):not(.button-primary):not(.unobutton
 	cursor: pointer !important;
 }
 
-/* Sub Tabs: example Format Cells: Font */
-
-.ui-tabs-content .ui-tabs.jsdialog.ui-widget {
-	border-block-start: 1px solid var(--color-border-lighter);
-	padding-block-start: 24px
-}
 
 /* Vertical tab rail: used when a dialog has more tabs than comfortably fit a
    horizontal row. The rail sits on the inline-start side and the panel fills
@@ -648,6 +642,7 @@ body button:not(.ui-corner-all):not(.button):not(.button-primary):not(.unobutton
 	inset-block: 0;
 	inset-inline-start: 0;
 	width: var(--cool-vertical-rail-width);
+	height: 100%;
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
@@ -657,6 +652,22 @@ body button:not(.ui-corner-all):not(.button):not(.button-primary):not(.unobutton
 
 .ui-tabs-root.vertical > .ui-tabs-content.jsdialog {
 	margin-inline-start: var(--cool-vertical-rail-width);
+	padding-left: 16px;
+}
+
+/* Keeps all elements in ui-treeview within the grid container */
+.jsdialog .ui-treeview,
+.jsdialog .ui-treeview.ui-grid-cell {
+	box-sizing: border-box;
+}
+
+/* Shrinks the Search bar in #CharNamePage instead of overflowing */
+#CharNamePage.jsdialog .ui-treeview.ui-grid-cell {
+	grid-template-columns: minmax(0, 1fr) !important;
+}
+
+#CharNamePage.jsdialog {
+	grid-template-columns: unset !important;
 }
 
 .ui-tabs.vertical .ui-tab.jsdialog {
@@ -1256,11 +1267,19 @@ img.context-menu-icon {
 	max-height: 32px;
 	width: auto;
 	width: stretch;
-	border: 1px solid var(--color-border-dark);
+	border: 1px solid var(--color-border-input-dark);
 	border-radius: var(--border-radius);
 	overflow: hidden;
 	align-self: center;
 	padding-inline: 4px;
+}
+
+/* The edit container is a grid cell and stretches to the row height, so its
+   input would otherwise sit at the top. Center the input vertically so it
+   lines up with the combo boxes and buttons beside it in the same row. */
+.jsdialog-window .ui-edit-container {
+	display: flex;
+	align-items: center;
 }
 
 .ui-treeview-search-input.jsdialog.ui-edit {
@@ -1374,7 +1393,7 @@ img.context-menu-icon {
 	margin-inline-end: 5px;
 	min-width: 70px;
 	width: 100%;
-	border: 1px solid var(--color-border-dark);
+	border: 1px solid var(--color-border-input-dark);
 	border-radius: var(--border-radius);
 	background: var(--color-background-dark);
 	color: var(--color-text-dark);
@@ -1383,7 +1402,7 @@ img.context-menu-icon {
 }
 
 .spinfieldcontainer:not([disabled]):hover {
-	border: 1px solid var(--color-border-darker);
+	border: 1px solid var(--color-border-input);
 	color: var(--color-text-darker);
 	background-color: var(--color-background-lighter);
 }
@@ -1778,6 +1797,33 @@ img.context-menu-icon {
 .ui-combobox-entry img {
 	border: 1px solid transparent;
 	max-height: 24px; /* required for hidpi*/
+}
+
+/* Icon-only entries: show a 16x16 image centered in both directions and
+ * shrink the row to the icon width so the dropdown does not leave a wide
+ * empty column. */
+.ui-combobox-entry.ui-combobox-notext {
+	width: auto;
+	justify-content: center;
+}
+
+.ui-combobox-entry.ui-combobox-notext > span {
+	display: none;
+}
+
+.ui-combobox-entry.ui-combobox-notext img {
+	width: 16px;
+	height: 16px;
+	max-height: 16px;
+	padding: 16px;
+}
+
+/* This is needed in chart line properties jsdialog.
+ * When every entry in a dropdown is icon-only, drop the parent-derived
+ * minimum width (set inline as the menu button width) so the popup shrinks
+ * to just the icons. */
+.modalpopup[id$='-dropdown']:has(.ui-combobox-entry.ui-combobox-notext):not(:has(.ui-combobox-entry:not(.ui-combobox-notext))) {
+	min-width: 50px !important;
 }
 
 .ui-combobox-entry img:hover {
@@ -2969,7 +3015,7 @@ button.has-img img {
 
 /* formulabar */
 #sc_input_window.formulabar {
-	border: 1px solid var(--color-border);
+	border: 1px solid var(--color-border-input);
 	flex-grow: 1;
 	background-color: var(--color-background-lighter);
 	border-radius: var(--border-radius) 0 0 var(--border-radius);
@@ -3813,7 +3859,7 @@ kbd,
 
 [id^='ColorPage'].jsdialog [id^='iconview_colors'].ui-iconview,
 [id^='colorwindow_iv_colors'].ui-iconview {
-	max-height: 19vh;
+	max-height: 25vh;
 }
 
 [id^='ColorPage'].jsdialog :is([id^='iconview_colors'], [id^='iconview_recent_colors']).ui-iconview .ui-iconview-entry :is(img, span),
@@ -4303,4 +4349,10 @@ img#collab-choice-avatar {
 .ui-treeview:focus-within {
 	outline: 2px solid var(--color-primary);
 	outline-offset: -1px;
+}
+
+.ui-treeview.ui-treeview-tree .ui-treeview-entry:focus,
+.ui-treeview.ui-treeview-tree .ui-treeview-entry:focus-visible {
+	outline: 2px solid var(--color-primary);
+	outline-offset: -2px;
 }

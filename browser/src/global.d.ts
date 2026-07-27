@@ -150,6 +150,8 @@ interface AppInterface {
 		right: number;
 	};
 	calc: {
+		maxColumnCount: number;
+		maxRowCount: number;
 		cellAddress: null | cool.SimplePoint;
 		cellCursorVisible: boolean;
 		cellCursorRectangle: null | cool.SimpleRectangle;
@@ -358,6 +360,9 @@ interface Window {
 		setMultiple(prefs: Record<string, string>): void;
 		sendPendingBrowserSettingsUpdate(): void;
 		canPersist: boolean;
+		prefersDarkOS(): boolean;
+		hasExplicitDarkModePref(): boolean;
+		seedDarkModeDefault(): boolean;
 	};
 	KeyboardShortcuts: KeyboardShortcuts;
 

@@ -417,10 +417,9 @@ bool ChildSession::_handleInput(const char *buffer, int length)
         std::string json;
         // TODO: route every filter through the live document (the branch below),
         // not just text, so structure and text reflect the same unsaved state.
-        // Needs: add ExtractDocumentStructure to SdXImpressDocument::supportsCommand,
-        // confirm the trackchanges/slides extractors are side-effect-free on the
-        // live doc, and re-test each filter. The reload path stays for the HTTP
-        // /cool/extract-document-structure endpoint, which has no live session.
+        // Needs: confirm the trackchanges/slides extractors are side-effect-free
+        // on the live doc, and re-test each filter. The reload path stays for the
+        // HTTP /cool/extract-document-structure endpoint, which has no live session.
         if (filter.starts_with("text"))
         {
             // The body-text filter reads the live in-memory document so it
@@ -700,7 +699,22 @@ bool ChildSession::_handleInput(const char *buffer, int length)
         }
         else if (tokens.equals(0, "downloadas"))
         {
+#if defined(QTAPP)
+            try
+            {
+                return downloadAs(tokens);
+            }
+            catch (const std::exception& exc)
+            {
+                LOG_ERR("downloadas failed with an exception: " << exc.what());
+                std::string id;
+                getTokenString(tokens, "id", id);
+                sendTextFrameAndLogError("error: cmd=downloadas kind=saveasfailed id=" + id);
+                return false;
+            }
+#else
             return downloadAs(tokens);
+#endif
         }
         else if (tokens.equals(0, "getchildid"))
         {
@@ -1310,6 +1324,30 @@ void insertUserNames(const std::map<int, UserInfo>& viewInfo, std::string& json)
 
 }
 
+// zstd's default compression level, a middle-of-the-road trade-off
+// between compression ratio and speed.
+constexpr int zstdCompressionLevel = 3;
+
+bool ChildSession::sendZstdFrame(std::string_view headerName, const char* data, size_t size)
+{
+    const std::string header(headerName);
+    const size_t bound = ZSTD_COMPRESSBOUND(size);
+    std::vector<char> output(header.size() + bound);
+    std::memcpy(output.data(), header.data(), header.size());
+
+    const size_t compressedSize
+        = ZSTD_compress(output.data() + header.size(), bound, data, size, zstdCompressionLevel);
+    if (ZSTD_isError(compressedSize))
+    {
+        LOG_WRN("Failed to zstd-compress " << headerName << ": "
+                                           << ZSTD_getErrorName(compressedSize));
+        return false;
+    }
+
+    output.resize(header.size() + compressedSize);
+    return sendBinaryFrame(output.data(), output.size());
+}
+
 bool ChildSession::getCommandValues(const StringVector& tokens)
 {
     bool success;
@@ -1338,30 +1376,13 @@ bool ChildSession::getCommandValues(const StringVector& tokens)
     }
     else if (command.rfind(".uno:VectorPrimitives", 0) == 0)
     {
+        // The primitive-tree JSON is large, so compress it with zstd. Fall
+        // back to an uncompressed text frame if compression fails.
         LOKitHelper::ScopedString values(getLOKitDocument()->getCommandValues(command.c_str()));
         const char* json = values.get() ? values.get() : "{}";
-        const size_t jsonSize = std::strlen(json);
-
-        // The primitive-tree JSON is large, so compress it with zstd and send
-        // it as a binary frame: a newline-terminated name header followed by
-        // the compressed payload.
-        const std::string header("zstdvectorprimitives:\n");
-        const size_t bound = ZSTD_COMPRESSBOUND(jsonSize);
-        std::vector<char> output(header.size() + bound);
-        std::memcpy(output.data(), header.data(), header.size());
-
-        const size_t compressedSize =
-            ZSTD_compress(output.data() + header.size(), bound, json, jsonSize, 3);
-        if (ZSTD_isError(compressedSize))
-        {
-            LOG_WRN("Failed to zstd-compress vector primitives: " << ZSTD_getErrorName(compressedSize));
+        success = sendZstdFrame("zstdvectorprimitives:\n", json, std::strlen(json));
+        if (!success)
             success = sendTextFrame("commandvalues: " + std::string(json));
-        }
-        else
-        {
-            output.resize(header.size() + compressedSize);
-            success = sendBinaryFrame(output.data(), output.size());
-        }
     }
     else
     {
@@ -1516,7 +1537,7 @@ bool ChildSession::downloadAs(const StringVector& tokens)
     // path-component strip below.
     if (Uri::decode(name).find('/') != std::string::npos)
     {
-        sendTextFrameAndLogError("error: cmd=downloadas kind=syntax");
+        sendTextFrameAndLogError("error: cmd=downloadas kind=syntax id=" + id);
         return false;
     }
 
@@ -1551,6 +1572,71 @@ bool ChildSession::downloadAs(const StringVector& tokens)
     // Prevent user inputting anything funny here.
     // A "name" should always be a name, not a path
     const Poco::Path filenameParam(name);
+#if defined(QTAPP)
+    {
+        // The in-process kit has no jail and no HTTP download service: save
+        // into a fresh private temp directory and hand the absolute path, as
+        // a file URI, to the app code in the reply. The directory is removed,
+        // file included, by the receiver of the reply.
+        std::string tmpDir;
+        try
+        {
+            tmpDir = FileUtil::createRandomTmpDir();
+            if (tmpDir == FileUtil::getSysTempDirectoryPath())
+            {
+                // A failed directory creation makes createRandomTmpDir fall back
+                // to returning the shared system temp root unchanged. Saving or
+                // removing anything there would touch files outside this
+                // download's own private directory, so refuse instead.
+                sendTextFrameAndLogError("error: cmd=downloadas kind=saveasfailed id=" + id);
+                return false;
+            }
+
+            const std::string filePath =
+                tmpDir + '/' + Poco::Path(Uri::decode(name)).getFileName();
+
+            LOG_DBG("Calling COKit's saveAs with URL: ["
+                    << anonymizeUrl(filePath) << "], Format: ["
+                    << (format.empty() ? "(nullptr)" : format.c_str()) << "], Filter Options: ["
+                    << (filterOptions.empty() ? "(nullptr)" : filterOptions.c_str()) << ']');
+
+            // saveAs takes a URI, not a plain path, and decodes any
+            // percent-escapes in it.
+            const std::string fileUri = Poco::URI(Poco::Path(filePath)).toString();
+            const bool ok = getLOKitDocument()->saveAs(
+                fileUri.c_str(), format.empty() ? nullptr : format.c_str(),
+                filterOptions.empty() ? nullptr : filterOptions.c_str());
+            // A true return from saveAs does not guarantee the output landed on
+            // disk: an edge-case document or filter can produce a missing or
+            // empty file.
+            const FileUtil::Stat outStat(filePath);
+            if (!ok || !outStat.exists() || outStat.size() == 0)
+            {
+                LOG_ERR("SaveAs Failed for id=" << id << " [" << anonymizeUrl(filePath)
+                                                << "]. error= " << getLOKitLastError());
+                FileUtil::removeFile(tmpDir, /*recursive=*/true);
+                sendTextFrameAndLogError("error: cmd=downloadas kind=saveasfailed id=" + id);
+                return false;
+            }
+
+            sendTextFrame("downloadas: id=" + id + " url=" + fileUri);
+            return true;
+        }
+        catch (const std::exception& exc)
+        {
+            LOG_ERR("SaveAs failed for id=" << id << " with an exception: " << exc.what());
+        }
+        catch (...)
+        {
+            LOG_ERR("SaveAs failed for id=" << id << " with an unknown exception");
+        }
+
+        if (!tmpDir.empty() && tmpDir != FileUtil::getSysTempDirectoryPath())
+            FileUtil::removeFile(tmpDir, /*recursive=*/true);
+        sendTextFrameAndLogError("error: cmd=downloadas kind=saveasfailed id=" + id);
+        return false;
+    }
+#endif
     const std::string nameAnonym = anonymizeUrl(name);
 
     const std::string jailDoc = getJailDocRoot();
@@ -2528,12 +2614,7 @@ bool ChildSession::unoCommand(const StringVector& tokens)
                           tokens.equals(1, ".uno:CopySlide") ||
                           tokens.equals(1, ".uno:OpenHyperlink") ||
                           tokens.startsWith(1, "vnd.sun.star.script:") ||
-                          // The in-process apps (e.g. coda-qt) dismiss their paste
-                          // progress UI on this result; browser online neither
-                          // needs nor expects it, so keep paste out of its path.
-                          (Util::isMobileApp() &&
-                           (tokens.equals(1, ".uno:Paste") ||
-                            tokens.equals(1, ".uno:PasteSpecial"))));
+                          tokens.equals(1, ".uno:Paste"));
 
     const std::string saveArgs = tokens.substrFromToken(2);
     LOG_TRC("uno command " << tokens[1] << " " << saveArgs << " notify: " << notify);
@@ -3548,6 +3629,7 @@ bool ChildSession::executeScript(char const * buffer, int length, StringVector c
 
     char * result = nullptr;
     char * error = nullptr;
+    bool usedLegacyUnoApi = false;
     // Capturing `this` is safe even though the proxy callback can fire long after
     // executeScript has returned, since the callback runs only while the proxy stays
     // attached and ChildSession outlives that:
@@ -3557,7 +3639,8 @@ bool ChildSession::executeScript(char const * buffer, int length, StringVector c
             static_cast<ChildSession *>(data)->sendTextFrame(
                 "proxycall: " + std::string(payload));
         },
-        this);
+        this,
+        &usedLegacyUnoApi);
 
     // Build the response by string concatenation rather than via Poco JSON,
     // because @c result is already a JSON value (whatever JSON.stringify
@@ -3574,6 +3657,10 @@ bool ChildSession::executeScript(char const * buffer, int length, StringVector c
         body += ",\"ok\":";
         body += result;
         std::free(result);
+    }
+    if (usedLegacyUnoApi)
+    {
+        body += ",\"legacyUnoApi\":true";
     }
     // else: the script ran but its value was something JSON.stringify drops
     // (undefined, a function, a symbol).  Emit neither "ok" nor "err" so the
@@ -3930,6 +4017,15 @@ void ChildSession::loKitCallback(const int type, const std::string& payload)
 
     switch (static_cast<COKitCallbackType>(type))
     {
+    case KIT_CALLBACK_VECTOR_PRIMITIVES_DELTA:
+        // Push the delta to the client as a zstd binary frame, the same
+        // shape the .uno:VectorPrimitives command response uses. When
+        // compression fails, send the JSON as a command values text
+        // frame, which the client routes by its type field, so the
+        // delta still arrives.
+        if (!sendZstdFrame("zstdvectorprimitivesdelta:\n", payload.data(), payload.size()))
+            sendTextFrame("commandvalues: " + payload);
+        break;
     case KIT_CALLBACK_INVALIDATE_TILES:
         {
             StringVector tokens(StringVector::tokenize(payload, ','));

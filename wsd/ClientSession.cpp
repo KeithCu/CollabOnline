@@ -682,6 +682,9 @@ bool ClientSession::_handleInput(const char *buffer, int length)
         return false;
     }
 
+    if (docBroker->handleAppMessage(client_from_this(), tokens, firstLine))
+        return true;
+
     if (tokens.equals(0, "DEBUG"))
     {
         LOG_DBG("From client: " << std::string(buffer, length).substr(strlen("DEBUG") + 1));
@@ -1621,6 +1624,14 @@ void ClientSession::uploadBrowserSettingsToWopiHost()
     const Authorization& auth = getAuthorization();
     Poco::URI uriObject = DocumentBroker::getPresetUploadBaseUrl(_uriPublic);
 
+    // A relative URI has no host to send the request to.
+    if (uriObject.isRelative())
+    {
+        LOG_WRN("Not uploading browser settings: WOPI base URL ["
+                << uriObject.toString() << "] is relative");
+        return;
+    }
+
     const std::string& filePath = "/settings/userconfig/browsersetting/browsersetting.json";
     uriObject.addQueryParameter("fileId", filePath);
     auth.authorizeURI(uriObject);
@@ -1662,6 +1673,14 @@ void ClientSession::uploadViewSettingsToWopiHost()
     {
         const Authorization& auth = getAuthorization();
         Poco::URI uriObject = DocumentBroker::getPresetUploadBaseUrl(_uriPublic);
+
+        // A relative URI has no host to send the request to.
+        if (uriObject.isRelative())
+        {
+            LOG_WRN("Not uploading view settings: WOPI base URL ["
+                    << uriObject.toString() << "] is relative");
+            return;
+        }
 
         const std::string filePath = "/settings/userconfig/viewsetting/viewsetting.json";
         uriObject.addQueryParameter("fileId", filePath);
@@ -1837,6 +1856,10 @@ bool ClientSession::resolveAndApplyAICredentials(Poco::JSON::Object::Ptr& viewSe
         // The key, when present, is sent as a Bearer token by the chat
         // request path. AI is enabled server-wide by the ai.enabled switch.
         ConfigUtil::getConfigValue<bool>("ai.enabled", false) &&
+        // AI is refused for an anonymous user (for example a public share-link
+        // visitor with no account), so a server-wide provider is not spent on
+        // them.
+        !isAnonymousUser() &&
 #else
         // The apps enable AI per-user via the Options dialog, and they fetch
         // the provider's model list natively with a request that
@@ -2240,7 +2263,7 @@ bool ClientSession::loadDocument(const char* /*buffer*/, int /*length*/,
 #if ENABLE_SSL
         // if ssl client verification was disabled in online for the wopi server,
         // then exempt that host from ssl host verification also in core
-        if (ssl::Manager::getClientVerification() == ssl::CertificateVerification::Disabled)
+        if (StorageConnectionManager::isStorageVerificationDisabled())
             oss << " verifyHost=false";
 #endif
 

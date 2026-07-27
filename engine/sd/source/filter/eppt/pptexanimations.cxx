@@ -54,6 +54,8 @@
 #include <oox/ppt/pptfilterhelpers.hxx>
 #include "pptexanimations.hxx"
 #include "pptexsoundcollection.hxx"
+#include <SdSoundLink.hxx>
+#include <com/sun/star/presentation/XSoundReference.hpp>
 #include "../ppt/pptanimations.hxx"
 #include <filter/msfilter/escherex.hxx>
 #include <osl/diagnose.h>
@@ -640,11 +642,12 @@ void AnimationExporter::exportNode( SvStream& rStrm, Reference< XAnimationNode >
                 Reference< XAudio > xAudio( xNode, UNO_QUERY );
                 if( xAudio.is() )
                 {
-                    Any aAny( xAudio->getSource() );
-                    OUString aURL;
+                    Reference< css::presentation::XSoundReference > xSound;
+                    xAudio->getSource() >>= xSound;
 
-                    if ( ( aAny >>= aURL)  &&  !aURL.isEmpty()  )
+                    if ( xSound.is() && !xSound->getURL().isEmpty() )
                     {
+                        SdSoundLink aSound( xSound->getURL(), xSound->getAllowed() );
                         sal_Int32 nU1 = 2;
                         sal_Int32 nTrigger = 3;
                         sal_Int32 nU3 = nAudioGroup;
@@ -670,7 +673,7 @@ void AnimationExporter::exportNode( SvStream& rStrm, Reference< XAnimationNode >
                         {
                             sal_uInt32 const nRefMode = 3;
                             sal_uInt32 const nRefType = 2;
-                            sal_uInt32 nRefId = mrExSoundCollection.GetId( aURL );
+                            sal_uInt32 nRefId = mrExSoundCollection.GetId( aSound );
                             sal_Int32 const begin = -1;
                             sal_Int32 const end = -1;
 
@@ -1097,10 +1100,10 @@ bool AnimationExporter::exportAnimProperty( SvStream& rStrm, const sal_uInt16 nP
     {
         switch( rAny.getValueTypeClass() )
         {
-            case css::uno::TypeClass_UNSIGNED_SHORT :
-            case css::uno::TypeClass_SHORT :
-            case css::uno::TypeClass_UNSIGNED_LONG :
-            case css::uno::TypeClass_LONG :
+            case cpo::uno::TypeClass_UNSIGNED_SHORT :
+            case cpo::uno::TypeClass_SHORT :
+            case cpo::uno::TypeClass_UNSIGNED_LONG :
+            case cpo::uno::TypeClass_LONG :
             {
                 sal_Int32 nVal = 0;
                 if ( rAny >>= nVal )
@@ -1111,7 +1114,7 @@ bool AnimationExporter::exportAnimProperty( SvStream& rStrm, const sal_uInt16 nP
             }
             break;
 
-            case css::uno::TypeClass_DOUBLE :
+            case cpo::uno::TypeClass_DOUBLE :
             {
                 double fVal = 0.0;
                 if ( rAny >>= fVal )
@@ -1121,7 +1124,7 @@ bool AnimationExporter::exportAnimProperty( SvStream& rStrm, const sal_uInt16 nP
                 }
             }
             break;
-            case css::uno::TypeClass_FLOAT :
+            case cpo::uno::TypeClass_FLOAT :
             {
                 float fVal = 0.0;
                 if ( rAny >>= fVal )
@@ -1139,7 +1142,7 @@ bool AnimationExporter::exportAnimProperty( SvStream& rStrm, const sal_uInt16 nP
                 }
             }
             break;
-            case css::uno::TypeClass_STRING :
+            case cpo::uno::TypeClass_STRING :
             {
                 OUString aStr;
                 if ( rAny >>= aStr )

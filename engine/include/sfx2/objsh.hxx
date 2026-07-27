@@ -199,7 +199,7 @@ private:
     bool                        mbAvoidRecentDocs; ///< Avoid adding to the recent documents list, if not necessary.
     bool                        bRememberSignature; // Do we want to remember the signature.
     bool                        bPendingLinkUpdateInfobar;
-    std::vector<std::pair<css::uno::WeakReference<css::beans::XPropertySet>, OUString>>
+    std::vector<std::pair<cpo::uno::WeakReference<css::beans::XPropertySet>, OUString>>
                                 maDeferredFormControlImages;
 
     enum TriState               {undefined, yes, no};
@@ -307,6 +307,11 @@ public:
     ErrCodeMsg                  GetErrorCode() const;
     void                        SetError(const ErrCodeMsg& rErr);
 
+    // The message from the most recent store failure. Empty when no store has
+    // failed since the value was last cleared.
+    void                        SetLastStoreErrorMessage(const OUString& rMessage);
+    OUString                    GetLastStoreErrorMessage() const;
+
     /**
      * Initialize bare minimum just enough for unit test runs.
      *
@@ -347,7 +352,7 @@ public:
     void                        AddDeferredFormControlImage(
                                     const css::uno::Reference<css::beans::XPropertySet>& rxControl,
                                     const OUString& rURL);
-    const std::vector<std::pair<css::uno::WeakReference<css::beans::XPropertySet>, OUString>>&
+    const std::vector<std::pair<cpo::uno::WeakReference<css::beans::XPropertySet>, OUString>>&
                                 GetDeferredFormControlImages() const
                                     { return maDeferredFormControlImages; }
     void                        ClearDeferredFormControlImages()

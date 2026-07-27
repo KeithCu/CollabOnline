@@ -12,9 +12,8 @@ excludelist:
     canvas/source/vcl/cachedbitmap.cxx:
     # Actually in use
     - com/sun/star/rendering/XCanvas.hpp
-    canvas/source/vcl/spritecanvas.cxx:
-    # Actually in use
-    - com/sun/star/awt/XTopWindow.hpp
-    canvas/source/vcl/spritecanvashelper.cxx:
-    # Needed for boost/polymorphic_cast.hpp
-    - boost/cast.hpp
+    canvas/inc/unopolypolygon.hxx:
+    # base class has to be a complete type
+    - com/sun/star/lang/XServiceInfo.hpp
+    - com/sun/star/rendering/XBezierPolyPolygon2D.hpp
+    - com/sun/star/rendering/XLinePolyPolygon2D.hpp

@@ -44,7 +44,7 @@
 #include <com/sun/star/uno/RuntimeException.hpp>
 #include <cpo/uno/Sequence.hxx>
 #include <cpo/uno/Type.hxx>
-#include <com/sun/star/uno/TypeClass.hpp>
+#include <cpo/uno/TypeClass.hpp>
 #include <cppu/unotype.hxx>
 #include <cppuhelper/implbase.hxx>
 #include <cppuhelper/supportsservice.hxx>
@@ -70,7 +70,7 @@ cpo::uno::Any resolveTypedefs(cpo::uno::Any const & type) {
     for (cpo::uno::Any t(type);;) {
         css::uno::Reference< css::reflection::XIndirectTypeDescription > ind(
             type, css::uno::UNO_QUERY);
-        if (!ind.is() || ind->getTypeClass() != css::uno::TypeClass_TYPEDEF) {
+        if (!ind.is() || ind->getTypeClass() != cpo::uno::TypeClass_TYPEDEF) {
             return t;
         }
         t <<= ind->getReferencedType();
@@ -82,20 +82,20 @@ class SimpleTypeDescription:
 {
 public:
     SimpleTypeDescription(
-        css::uno::TypeClass typeClass, OUString name):
+        cpo::uno::TypeClass typeClass, OUString name):
         typeClass_(typeClass), name_(std::move(name))
     {}
 
 private:
     virtual ~SimpleTypeDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
+    virtual cpo::uno::TypeClass getTypeClass() override
     { return typeClass_; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
-    css::uno::TypeClass typeClass_;
+    cpo::uno::TypeClass typeClass_;
     OUString name_;
 };
 
@@ -112,13 +112,13 @@ public:
 private:
     virtual ~SequenceTypeDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_SEQUENCE; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_SEQUENCE; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getReferencedType() override
     { return manager_->resolve(componentType_); }
 
@@ -136,7 +136,7 @@ protected:
     virtual ~PublishableDescription() override {}
 
 private:
-    virtual bool SAL_CALL isPublished() override
+    virtual bool isPublished() override
     { return published_; }
 
     bool published_;
@@ -156,16 +156,16 @@ public:
 private:
     virtual ~ModuleDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_MODULE; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_MODULE; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XTypeDescription > >
-    SAL_CALL getMembers() override;
+    getMembers() override;
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
     OUString name_;
@@ -208,18 +208,18 @@ public:
 private:
     virtual ~EnumTypeDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_ENUM; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_ENUM; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
-    virtual sal_Int32 SAL_CALL getDefaultEnumValue() override
+    virtual sal_Int32 getDefaultEnumValue() override
     { return entity_->getMembers()[0].value; }
 
-    virtual cpo::uno::Sequence< OUString > SAL_CALL getEnumNames() override;
+    virtual cpo::uno::Sequence< OUString > getEnumNames() override;
 
-    virtual cpo::uno::Sequence< sal_Int32 > SAL_CALL getEnumValues() override;
+    virtual cpo::uno::Sequence< sal_Int32 > getEnumValues() override;
 
     OUString name_;
     rtl::Reference< unoidl::EnumTypeEntity > entity_;
@@ -266,13 +266,13 @@ public:
 private:
     virtual ~PlainStructTypeDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_STRUCT; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_STRUCT; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getBaseType() override {
         return entity_->getDirectBase().isEmpty()
             ? css::uno::Reference< css::reflection::XTypeDescription >()
@@ -282,17 +282,17 @@ private:
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XTypeDescription > >
-    SAL_CALL getMemberTypes() override;
+    getMemberTypes() override;
 
-    virtual cpo::uno::Sequence< OUString > SAL_CALL getMemberNames() override;
+    virtual cpo::uno::Sequence< OUString > getMemberNames() override;
 
-    virtual cpo::uno::Sequence< OUString > SAL_CALL getTypeParameters() override
+    virtual cpo::uno::Sequence< OUString > getTypeParameters() override
     { return cpo::uno::Sequence< OUString >(); }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XTypeDescription > >
-    SAL_CALL getTypeArguments() override {
+    getTypeArguments() override {
         return cpo::uno::Sequence<
             css::uno::Reference< css::reflection::XTypeDescription > >();
     }
@@ -340,10 +340,10 @@ public:
 private:
     virtual ~ParameterizedMemberTypeDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_UNKNOWN; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_UNKNOWN; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return typeParameterName_; }
 
     OUString typeParameterName_;
@@ -369,29 +369,29 @@ public:
 private:
     virtual ~PolymorphicStructTypeTemplateDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_STRUCT; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_STRUCT; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getBaseType() override
     { return css::uno::Reference< css::reflection::XTypeDescription >(); }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XTypeDescription > >
-    SAL_CALL getMemberTypes() override;
+    getMemberTypes() override;
 
-    virtual cpo::uno::Sequence< OUString > SAL_CALL getMemberNames() override;
+    virtual cpo::uno::Sequence< OUString > getMemberNames() override;
 
-    virtual cpo::uno::Sequence< OUString > SAL_CALL getTypeParameters() override;
+    virtual cpo::uno::Sequence< OUString > getTypeParameters() override;
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XTypeDescription > >
-    SAL_CALL getTypeArguments() override {
+    getTypeArguments() override {
         return cpo::uno::Sequence<
             css::uno::Reference< css::reflection::XTypeDescription > >();
     }
@@ -464,30 +464,30 @@ public:
 private:
     virtual ~InstantiatedPolymorphicStructTypeDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_STRUCT; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_STRUCT; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getBaseType() override
     { return css::uno::Reference< css::reflection::XTypeDescription >(); }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XTypeDescription > >
-    SAL_CALL getMemberTypes() override;
+    getMemberTypes() override;
 
-    virtual cpo::uno::Sequence< OUString > SAL_CALL getMemberNames() override;
+    virtual cpo::uno::Sequence< OUString > getMemberNames() override;
 
-    virtual cpo::uno::Sequence< OUString > SAL_CALL getTypeParameters() override
+    virtual cpo::uno::Sequence< OUString > getTypeParameters() override
     { return cpo::uno::Sequence< OUString >(); }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XTypeDescription > >
-    SAL_CALL getTypeArguments() override;
+    getTypeArguments() override;
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
     OUString name_;
@@ -562,13 +562,13 @@ public:
 private:
     virtual ~ExceptionTypeDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_EXCEPTION; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_EXCEPTION; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getBaseType() override {
         return entity_->getDirectBase().isEmpty()
             ? css::uno::Reference< css::reflection::XTypeDescription >()
@@ -578,9 +578,9 @@ private:
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XTypeDescription > >
-    SAL_CALL getMemberTypes() override;
+    getMemberTypes() override;
 
-    virtual cpo::uno::Sequence< OUString > SAL_CALL getMemberNames() override;
+    virtual cpo::uno::Sequence< OUString > getMemberNames() override;
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
     OUString name_;
@@ -629,37 +629,37 @@ public:
 private:
     virtual ~AttributeDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_INTERFACE_ATTRIBUTE; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_INTERFACE_ATTRIBUTE; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
-    virtual OUString SAL_CALL getMemberName() override
+    virtual OUString getMemberName() override
     { return attribute_.name; }
 
-    virtual sal_Int32 SAL_CALL getPosition() override
+    virtual sal_Int32 getPosition() override
     { return position_; }
 
-    virtual bool SAL_CALL isReadOnly() override
+    virtual bool isReadOnly() override
     { return attribute_.readOnly; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getType() override
     { return manager_->resolve(attribute_.type); }
 
-    virtual bool SAL_CALL isBound() override
+    virtual bool isBound() override
     { return attribute_.bound; }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XCompoundTypeDescription > >
-    SAL_CALL getGetExceptions() override;
+    getGetExceptions() override;
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XCompoundTypeDescription > >
-    SAL_CALL getSetExceptions() override;
+    getSetExceptions() override;
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
     OUString name_;
@@ -713,14 +713,14 @@ public:
 private:
     virtual ~MethodParameter() override {}
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return parameter_.name; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getType() override
     { return manager_->resolve(parameter_.type); }
 
-    virtual bool SAL_CALL isIn() override {
+    virtual bool isIn() override {
         return
             (parameter_.direction
              == unoidl::InterfaceTypeEntity::Method::Parameter::DIRECTION_IN)
@@ -729,7 +729,7 @@ private:
                     DIRECTION_IN_OUT);
     }
 
-    virtual bool SAL_CALL isOut() override {
+    virtual bool isOut() override {
         return
             (parameter_.direction
              == unoidl::InterfaceTypeEntity::Method::Parameter::DIRECTION_OUT)
@@ -738,7 +738,7 @@ private:
                     DIRECTION_IN_OUT);
     }
 
-    virtual sal_Int32 SAL_CALL getPosition() override
+    virtual sal_Int32 getPosition() override
     { return position_; }
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
@@ -761,34 +761,34 @@ public:
 private:
     virtual ~MethodDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_INTERFACE_METHOD; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_INTERFACE_METHOD; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
-    virtual OUString SAL_CALL getMemberName() override
+    virtual OUString getMemberName() override
     { return method_.name; }
 
-    virtual sal_Int32 SAL_CALL getPosition() override
+    virtual sal_Int32 getPosition() override
     { return position_; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getReturnType() override
     { return manager_->resolve(method_.returnType); }
 
-    virtual bool SAL_CALL isOneway() override
+    virtual bool isOneway() override
     { return false; }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XMethodParameter > >
-    SAL_CALL getParameters() override;
+    getParameters() override;
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XTypeDescription > >
-    SAL_CALL getExceptions() override;
+    getExceptions() override;
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
     OUString name_;
@@ -896,13 +896,13 @@ public:
 private:
     virtual ~InterfaceTypeDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_INTERFACE; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_INTERFACE; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getBaseType() override {
         return entity_->getDirectMandatoryBases().empty()
             ? css::uno::Reference< css::reflection::XTypeDescription >()
@@ -913,17 +913,17 @@ private:
     cpo::uno::Sequence<
         css::uno::Reference<
              css::reflection::XInterfaceMemberTypeDescription > >
-    SAL_CALL getMembers() override;
+    getMembers() override;
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XTypeDescription > >
-    SAL_CALL getBaseTypes() override;
+    getBaseTypes() override;
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XTypeDescription > >
-    SAL_CALL getOptionalBaseTypes() override;
+    getOptionalBaseTypes() override;
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
     OUString name_;
@@ -998,13 +998,13 @@ public:
 private:
     virtual ~ConstantDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_CONSTANT; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_CONSTANT; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
-    virtual cpo::uno::Any SAL_CALL getConstantValue() override
+    virtual cpo::uno::Any getConstantValue() override
     { return value_; }
 
     OUString name_;
@@ -1068,16 +1068,16 @@ public:
 private:
     virtual ~ConstantGroupDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_CONSTANTS; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_CONSTANTS; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XConstantTypeDescription > >
-    SAL_CALL getConstants() override;
+    getConstants() override;
 
     OUString name_;
     rtl::Reference< unoidl::ConstantGroupEntity > entity_;
@@ -1114,13 +1114,13 @@ public:
 private:
     virtual ~TypedefDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_TYPEDEF; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_TYPEDEF; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getReferencedType() override
     { return manager_->resolve(entity_->getType()); }
 
@@ -1143,23 +1143,23 @@ public:
 private:
     virtual ~ConstructorParameter() override {}
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return parameter_.name; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getType() override
     { return manager_->resolve(parameter_.type); }
 
-    virtual bool SAL_CALL isIn() override
+    virtual bool isIn() override
     { return true; }
 
-    virtual bool SAL_CALL isOut() override
+    virtual bool isOut() override
     { return false; }
 
-    virtual sal_Int32 SAL_CALL getPosition() override
+    virtual sal_Int32 getPosition() override
     { return position_; }
 
-    virtual bool SAL_CALL isRestParameter() override
+    virtual bool isRestParameter() override
     { return parameter_.rest; }
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
@@ -1182,21 +1182,21 @@ public:
 private:
     virtual ~ConstructorDescription() override {}
 
-    virtual bool SAL_CALL isDefaultConstructor() override
+    virtual bool isDefaultConstructor() override
     { return constructor_.defaultConstructor; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return constructor_.name; }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XParameter > >
-    SAL_CALL getParameters() override;
+    getParameters() override;
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XCompoundTypeDescription > >
-    SAL_CALL getExceptions() override;
+    getExceptions() override;
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
     unoidl::SingleInterfaceBasedServiceEntity::Constructor constructor_;
@@ -1252,16 +1252,16 @@ public:
 private:
     virtual ~SingleInterfaceBasedServiceDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_SERVICE; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_SERVICE; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XServiceTypeDescription > >
-    SAL_CALL getMandatoryServices() override
+    getMandatoryServices() override
     {
         return cpo::uno::Sequence<
             css::uno::Reference< css::reflection::XServiceTypeDescription > >();
@@ -1270,7 +1270,7 @@ private:
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XServiceTypeDescription > >
-    SAL_CALL getOptionalServices() override
+    getOptionalServices() override
     {
         return cpo::uno::Sequence<
             css::uno::Reference< css::reflection::XServiceTypeDescription > >();
@@ -1279,7 +1279,7 @@ private:
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XInterfaceTypeDescription > >
-    SAL_CALL getMandatoryInterfaces() override
+    getMandatoryInterfaces() override
     {
         return cpo::uno::Sequence<
             css::uno::Reference<
@@ -1289,7 +1289,7 @@ private:
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XInterfaceTypeDescription > >
-    SAL_CALL getOptionalInterfaces() override
+    getOptionalInterfaces() override
     {
         return cpo::uno::Sequence<
             css::uno::Reference<
@@ -1299,24 +1299,24 @@ private:
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XPropertyTypeDescription > >
-    SAL_CALL getProperties() override
+    getProperties() override
     {
         return cpo::uno::Sequence<
             css::uno::Reference<
                 css::reflection::XPropertyTypeDescription > >();
     }
 
-    virtual bool SAL_CALL isSingleInterfaceBased() override
+    virtual bool isSingleInterfaceBased() override
     { return true; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getInterface() override
     { return manager_->resolve(entity_->getBase()); }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XServiceConstructorDescription > >
-    SAL_CALL getConstructors() override;
+    getConstructors() override;
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
     OUString name_;
@@ -1353,16 +1353,16 @@ public:
 private:
     virtual ~PropertyDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_PROPERTY; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_PROPERTY; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return property_.name; }
 
-    virtual sal_Int16 SAL_CALL getPropertyFlags() override
+    virtual sal_Int16 getPropertyFlags() override
     { return property_.attributes; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getPropertyTypeDescription() override
     { return manager_->resolve(property_.type); }
 
@@ -1390,48 +1390,48 @@ public:
 private:
     virtual ~AccumulationBasedServiceDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_SERVICE; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_SERVICE; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XServiceTypeDescription > >
-    SAL_CALL getMandatoryServices() override;
+    getMandatoryServices() override;
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XServiceTypeDescription > >
-    SAL_CALL getOptionalServices() override;
+    getOptionalServices() override;
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XInterfaceTypeDescription > >
-    SAL_CALL getMandatoryInterfaces() override;
+    getMandatoryInterfaces() override;
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XInterfaceTypeDescription > >
-    SAL_CALL getOptionalInterfaces() override;
+    getOptionalInterfaces() override;
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XPropertyTypeDescription > >
-    SAL_CALL getProperties() override;
+    getProperties() override;
 
-    virtual bool SAL_CALL isSingleInterfaceBased() override
+    virtual bool isSingleInterfaceBased() override
     { return false; }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     getInterface() override
     { return css::uno::Reference< css::reflection::XTypeDescription >(); }
 
     virtual
     cpo::uno::Sequence<
         css::uno::Reference< css::reflection::XServiceConstructorDescription > >
-    SAL_CALL getConstructors() override
+    getConstructors() override
     {
         return cpo::uno::Sequence<
             css::uno::Reference<
@@ -1558,24 +1558,24 @@ public:
 private:
     virtual ~InterfaceBasedSingletonDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_SINGLETON; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_SINGLETON; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
     virtual css::uno::Reference< css::reflection::XServiceTypeDescription >
-    SAL_CALL getService() override
+    getService() override
     {
         return
             css::uno::Reference< css::reflection::XServiceTypeDescription >();
     }
 
-    virtual bool SAL_CALL isInterfaceBased() override
+    virtual bool isInterfaceBased() override
     { return true; }
 
     virtual css::uno::Reference< css::reflection::XTypeDescription >
-    SAL_CALL getInterface() override
+    getInterface() override
     { return manager_->resolve(entity_->getBase()); }
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
@@ -1602,24 +1602,24 @@ public:
 private:
     virtual ~ServiceBasedSingletonDescription() override {}
 
-    virtual css::uno::TypeClass SAL_CALL getTypeClass() override
-    { return css::uno::TypeClass_SINGLETON; }
+    virtual cpo::uno::TypeClass getTypeClass() override
+    { return cpo::uno::TypeClass_SINGLETON; }
 
-    virtual OUString SAL_CALL getName() override
+    virtual OUString getName() override
     { return name_; }
 
     virtual css::uno::Reference< css::reflection::XServiceTypeDescription >
-    SAL_CALL getService() override
+    getService() override
     {
         return css::uno::Reference< css::reflection::XServiceTypeDescription >(
             manager_->resolve(entity_->getBase()), css::uno::UNO_QUERY_THROW);
     }
 
-    virtual bool SAL_CALL isInterfaceBased() override
+    virtual bool isInterfaceBased() override
     { return false; }
 
     virtual css::uno::Reference< css::reflection::XTypeDescription >
-    SAL_CALL getInterface() override
+    getInterface() override
     { return css::uno::Reference< css::reflection::XTypeDescription >(); }
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
@@ -1635,7 +1635,7 @@ public:
         rtl::Reference< cppuhelper::TypeManager > const & manager,
         OUString const & prefix,
         rtl::Reference< unoidl::MapCursor > const & cursor,
-        cpo::uno::Sequence< css::uno::TypeClass > const & types, bool deep):
+        cpo::uno::Sequence< cpo::uno::TypeClass > const & types, bool deep):
         manager_(manager), types_(types), deep_(deep)
     {
         assert(manager.is());
@@ -1646,16 +1646,16 @@ public:
 private:
     virtual ~Enumeration() override {}
 
-    virtual bool SAL_CALL hasMoreElements() override
+    virtual bool hasMoreElements() override
     { return !positions_.empty(); }
 
-    virtual cpo::uno::Any SAL_CALL nextElement() override
+    virtual cpo::uno::Any nextElement() override
     { return cpo::uno::Any(nextTypeDescription()); }
 
-    virtual css::uno::Reference< css::reflection::XTypeDescription > SAL_CALL
+    virtual css::uno::Reference< css::reflection::XTypeDescription >
     nextTypeDescription() override;
 
-    bool matches(css::uno::TypeClass tc) const;
+    bool matches(cpo::uno::TypeClass tc) const;
 
     void findNextMatch();
 
@@ -1691,7 +1691,7 @@ private:
     };
 
     rtl::Reference< cppuhelper::TypeManager > manager_;
-    cpo::uno::Sequence< css::uno::TypeClass > types_;
+    cpo::uno::Sequence< cpo::uno::TypeClass > types_;
     bool deep_;
 
     std::mutex mutex_;
@@ -1716,7 +1716,7 @@ Enumeration::nextTypeDescription()
     return manager_->resolve(name);
 }
 
-bool Enumeration::matches(css::uno::TypeClass tc) const {
+bool Enumeration::matches(cpo::uno::TypeClass tc) const {
     if (!types_.hasElements()) {
         return true;
     }
@@ -1740,10 +1740,10 @@ void Enumeration::findNextMatch() {
                     continue;
                 }
                 name = positions_.top().prefix + name;
-                css::uno::TypeClass tc;
+                cpo::uno::TypeClass tc;
                 switch (ent->getSort()) {
                 case unoidl::Entity::SORT_MODULE:
-                    tc = css::uno::TypeClass_MODULE;
+                    tc = cpo::uno::TypeClass_MODULE;
                     if (deep_) {
                         positions_.push(
                             Position(
@@ -1753,24 +1753,24 @@ void Enumeration::findNextMatch() {
                     }
                     break;
                 case unoidl::Entity::SORT_ENUM_TYPE:
-                    tc = css::uno::TypeClass_ENUM;
+                    tc = cpo::uno::TypeClass_ENUM;
                     break;
                 case unoidl::Entity::SORT_PLAIN_STRUCT_TYPE:
                 case unoidl::Entity::SORT_POLYMORPHIC_STRUCT_TYPE_TEMPLATE:
-                    tc = css::uno::TypeClass_STRUCT;
+                    tc = cpo::uno::TypeClass_STRUCT;
                     break;
                 case unoidl::Entity::SORT_EXCEPTION_TYPE:
-                    tc = css::uno::TypeClass_EXCEPTION;
+                    tc = cpo::uno::TypeClass_EXCEPTION;
                     break;
                 case unoidl::Entity::SORT_INTERFACE_TYPE:
-                    tc = css::uno::TypeClass_INTERFACE;
+                    tc = cpo::uno::TypeClass_INTERFACE;
                     break;
                 case unoidl::Entity::SORT_TYPEDEF:
-                    tc = css::uno::TypeClass_TYPEDEF;
+                    tc = cpo::uno::TypeClass_TYPEDEF;
                     break;
                 case unoidl::Entity::SORT_CONSTANT_GROUP:
-                    tc = css::uno::TypeClass_CONSTANTS;
-                    if (deep_ && matches(css::uno::TypeClass_CONSTANT)) {
+                    tc = cpo::uno::TypeClass_CONSTANTS;
+                    if (deep_ && matches(cpo::uno::TypeClass_CONSTANT)) {
                         positions_.push(
                             Position(
                                 makePrefix(name),
@@ -1780,11 +1780,11 @@ void Enumeration::findNextMatch() {
                     break;
                 case unoidl::Entity::SORT_SINGLE_INTERFACE_BASED_SERVICE:
                 case unoidl::Entity::SORT_ACCUMULATION_BASED_SERVICE:
-                    tc = css::uno::TypeClass_SERVICE;
+                    tc = cpo::uno::TypeClass_SERVICE;
                     break;
                 case unoidl::Entity::SORT_INTERFACE_BASED_SINGLETON:
                 case unoidl::Entity::SORT_SERVICE_BASED_SINGLETON:
-                    tc = css::uno::TypeClass_SINGLETON;
+                    tc = cpo::uno::TypeClass_SINGLETON;
                     break;
                 default:
                     for (;;) { std::abort(); } // this cannot happen
@@ -1823,22 +1823,22 @@ cppuhelper::TypeManager::TypeManager():
 
 cpo::uno::Any cppuhelper::TypeManager::find(OUString const & name) {
     //TODO: caching? (here or in unoidl::Manager?)
-    static constexpr std::pair<std::u16string_view, css::uno::TypeClass> const simple[] = {
-        { u"void", css::uno::TypeClass_VOID },
-        { u"boolean", css::uno::TypeClass_BOOLEAN },
-        { u"byte", css::uno::TypeClass_BYTE },
-        { u"short", css::uno::TypeClass_SHORT },
-        { u"unsigned short", css::uno::TypeClass_UNSIGNED_SHORT },
-        { u"long", css::uno::TypeClass_LONG },
-        { u"unsigned long", css::uno::TypeClass_UNSIGNED_LONG },
-        { u"hyper", css::uno::TypeClass_HYPER },
-        { u"unsigned hyper", css::uno::TypeClass_UNSIGNED_HYPER },
-        { u"float", css::uno::TypeClass_FLOAT },
-        { u"double", css::uno::TypeClass_DOUBLE },
-        { u"char", css::uno::TypeClass_CHAR },
-        { u"string", css::uno::TypeClass_STRING },
-        { u"type", css::uno::TypeClass_TYPE },
-        { u"any", css::uno::TypeClass_ANY } };
+    static constexpr std::pair<std::u16string_view, cpo::uno::TypeClass> const simple[] = {
+        { u"void", cpo::uno::TypeClass_VOID },
+        { u"boolean", cpo::uno::TypeClass_BOOLEAN },
+        { u"byte", cpo::uno::TypeClass_BYTE },
+        { u"short", cpo::uno::TypeClass_SHORT },
+        { u"unsigned short", cpo::uno::TypeClass_UNSIGNED_SHORT },
+        { u"long", cpo::uno::TypeClass_LONG },
+        { u"unsigned long", cpo::uno::TypeClass_UNSIGNED_LONG },
+        { u"hyper", cpo::uno::TypeClass_HYPER },
+        { u"unsigned hyper", cpo::uno::TypeClass_UNSIGNED_HYPER },
+        { u"float", cpo::uno::TypeClass_FLOAT },
+        { u"double", cpo::uno::TypeClass_DOUBLE },
+        { u"char", cpo::uno::TypeClass_CHAR },
+        { u"string", cpo::uno::TypeClass_STRING },
+        { u"type", cpo::uno::TypeClass_TYPE },
+        { u"any", cpo::uno::TypeClass_ANY } };
     for (const auto& [ rName, rTypeClass ] : simple) {
         if (name == rName) {
             return cpo::uno::Any(
@@ -1989,7 +1989,7 @@ void cppuhelper::TypeManager::remove(cpo::uno::Any const & aElement)
 css::uno::Reference< css::reflection::XTypeDescriptionEnumeration >
 cppuhelper::TypeManager::createTypeDescriptionEnumeration(
     OUString const & moduleName,
-    cpo::uno::Sequence< css::uno::TypeClass > const & types,
+    cpo::uno::Sequence< cpo::uno::TypeClass > const & types,
     css::reflection::TypeDescriptionSearchDepth depth)
 {
     rtl::Reference< unoidl::MapCursor > cursor;

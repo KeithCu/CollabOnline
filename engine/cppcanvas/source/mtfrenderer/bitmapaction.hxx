@@ -19,7 +19,7 @@
 
 #pragma once
 
-#include <cppcanvas/canvas.hxx>
+#include <canvas.hxx>
 #include <action.hxx>
 
 namespace basegfx {
@@ -28,9 +28,9 @@ namespace basegfx {
 }
 class Bitmap;
 
-/* Definition of internal::BitmapActionFactory */
+/* Definition of BitmapActionFactory */
 
-namespace cppcanvas::internal
+namespace cppcanvas
 {
         struct OutDevState;
 

@@ -125,36 +125,24 @@ bool DocumentLinkManager::idleCheckLinks()
 
 bool DocumentLinkManager::hasDdeLinks() const
 {
-    return hasExternalLinks(true, false, false, false);
-}
-
-bool DocumentLinkManager::hasExternalLinks() const
-{
-    return hasExternalLinks(true, true, true, true);
-}
-
-bool DocumentLinkManager::hasExternalLinks(bool bDde, bool bOle, bool bWebService, bool bGraphic) const
-{
     sfx2::LinkManager* pMgr = mpImpl->mpLinkManager;
     if (!pMgr)
         return false;
 
     const sfx2::SvBaseLinks& rLinks = pMgr->GetLinks();
     for (const auto & rLink : rLinks)
-    {
-        sfx2::SvBaseLink* pBase = rLink.get();
-        if (bDde && dynamic_cast<ScDdeLink*>(pBase))
+        if (dynamic_cast<ScDdeLink*>(rLink.get()))
             return true;
-        if (bOle && (dynamic_cast<SdrEmbedObjectLink*>(pBase) || dynamic_cast<SdrIFrameLink*>(pBase)))
-            return true;
-        if (bWebService && dynamic_cast<ScWebServiceLink*>(pBase))
-            return true;
-        if (bGraphic && pBase
-            && pBase->GetObjType() == sfx2::SvBaseLinkObjectType::ClientGraphic)
-            return true;
-    }
 
     return false;
+}
+
+bool DocumentLinkManager::hasUpdatableLinks() const
+{
+    // Every link in the document's LinkManager can be updated from an external
+    // source, so a non-empty link list means the document has updatable links.
+    sfx2::LinkManager* pMgr = mpImpl->mpLinkManager;
+    return pMgr && !pMgr->GetLinks().empty();
 }
 
 bool DocumentLinkManager::hasExternalRefLinks() const

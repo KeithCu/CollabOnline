@@ -33,7 +33,6 @@ $(eval $(call gb_Library_use_externals,drawinglayer,\
 ifneq ($(ENABLE_WASM_STRIP_CANVAS),TRUE)
 $(eval $(call gb_Library_use_libraries,drawinglayer,\
     canvastools \
-    cppcanvas \
 ))
 endif
 
@@ -230,5 +229,11 @@ $(eval $(call gb_Library_add_exception_objects,drawinglayer,\
     drawinglayer/source/dumper/XShapeDumper \
     drawinglayer/source/dumper/EnhancedShapeDumper \
 ))
+
+ifeq ($(OS),LINUX)
+$(eval $(call gb_Library_add_libs,drawinglayer,\
+	-ldl \
+))
+endif
 
 # vim: set noet sw=4 ts=4:

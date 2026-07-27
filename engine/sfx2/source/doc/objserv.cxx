@@ -437,7 +437,7 @@ bool SfxObjectShell::IsSignPDF() const
     return false;
 }
 
-static void sendErrorToKit(const ErrCodeMsg& error)
+static void sendErrorToKit(SfxObjectShell& rShell, const ErrCodeMsg& error)
 {
     if (error.GetCode().GetClass() == ErrCodeClass::NONE)
         return;
@@ -453,7 +453,10 @@ static void sendErrorToKit(const ErrCodeMsg& error)
 
     OUString aErr;
     if (ErrorStringFactory::CreateString(error, aErr))
+    {
         aTree.put("message", aErr.toUtf8());
+        rShell.SetLastStoreErrorMessage(aErr);
+    }
 
     std::stringstream aStream;
     boost::property_tree::write_json(aStream, aTree);
@@ -1202,7 +1205,7 @@ void SfxObjectShell::ExecFile_Impl(SfxRequest &rReq)
             if ( lErr != ERRCODE_IO_ABORT )
             {
                 if (comphelper::COKit::isActive())
-                    sendErrorToKit(lErr);
+                    sendErrorToKit(*this, lErr);
                 else
                 {
                     SfxErrorContext aEc(ERRCTX_SFX_SAVEASDOC,GetTitle());
@@ -1379,7 +1382,7 @@ void SfxObjectShell::ExecFile_Impl(SfxRequest &rReq)
             ErrCodeMsg lErr = GetErrorCode();
 
             if (comphelper::COKit::isActive())
-                sendErrorToKit(lErr);
+                sendErrorToKit(*this, lErr);
             else
             {
                 weld::Window* pDialogParent = GetReqDialogParent(rReq, *this);
@@ -1758,6 +1761,7 @@ void SfxObjectShell::ShowLinkUpdateInfobar()
     rHelpBtn.connect_clicked(LINK(nullptr, LinkUpdateHelp, DispatchHelpLinksHdl));
 
     weld::Button& rBtn = pInfoBar->addButton();
+    rBtn.set_buildable_name(u"allowupdating"_ustr);
     rBtn.set_label(SfxResId(STR_INFOBAR_ALLOW_UPDATING));
     rBtn.set_tooltip_text(SfxResId(STR_INFOBAR_ALLOW_UPDATING_TOOLTIP));
     rBtn.connect_clicked(LINK(this, SfxObjectShell, AllowLinksUpdateHdl));

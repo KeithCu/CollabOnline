@@ -1140,7 +1140,11 @@ ios*) # iOS
     enable_coinmp=no
     enable_xmlhelp=no
     with_ppds=no
-    if test "$enable_ios_simulator" = "yes"; then
+    # The simulator ran only on Intel Macs when this was written, so it
+    # forced the host triple to x86_64. On Apple Silicon the simulator is
+    # arm64, and host_cpu already holds the right value, so only rewrite
+    # the triple for the x86_64 simulator and leave arm64 untouched.
+    if test "$enable_ios_simulator" = "yes" -a "$host_cpu" = "x86_64"; then
         host=x86_64-apple-darwin
     fi
     # See "Default values, as such probably valid just for Linux" comment above the case "$host_os"
@@ -1280,7 +1284,6 @@ test "${test_cups+set}" = set || test_cups="$using_x11"
 test "${test_dbus+set}" = set || test_dbus="$using_x11"
 test "${test_gen+set}" = set || test_gen="$using_x11"
 test "${test_gtk3+set}" = set || test_gtk3="$using_x11"
-test "${test_gtk4+set}" = set || test_gtk4="$using_x11"
 test "${test_randr+set}" = set || test_randr="$using_x11"
 test "${test_xrender+set}" = set || test_xrender="$using_x11"
 test "${using_headless_plugin+set}" = set || using_headless_plugin="$using_freetype_fontconfig"
@@ -1303,7 +1306,6 @@ disable_x11_tests()
     test_dbus=no
     test_gen=no
     test_gtk3=no
-    test_gtk4=no
     test_randr=no
     test_xrender=no
 }
@@ -1696,7 +1698,7 @@ AC_ARG_ENABLE(avahi,
 AC_ARG_ENABLE(msvc-debug-runtime,
     AS_HELP_STRING([--enable-msvc-debug-runtime],
         [Determines whether to use the Microsoft Visual Studio debugging runtime.
-         Automatically turned on by --enable-dbgutil but not by --enable-debug])
+         Automatically turned on by --enable-dbgutil and --enable-debug])
 )
 
 AC_ARG_ENABLE(msvc-analyze,
@@ -1726,7 +1728,8 @@ libo_FUZZ_ARG_ENABLE(dbgutil,
 libo_FUZZ_ARG_ENABLE(debug,
     AS_HELP_STRING([--enable-debug],
         [Include debugging information, disable compiler optimization and inlining plus
-         extra debugging code like assertions. Extra large build! (enables -g compiler flag).]))
+         extra debugging code like assertions. Extra large build! (enables -g compiler flag).
+         On Windows this is the same as --enable-dbgutil.]))
 
 libo_FUZZ_ARG_ENABLE(split-debug,
     AS_HELP_STRING([--disable-split-debug],
@@ -1819,10 +1822,6 @@ libo_FUZZ_ARG_ENABLE(gtk3,
         [Determines whether to use Gtk+ 3.0 vclplug on platforms where Gtk+ 3.0 is available.]),
 ,test "${test_gtk3}" = no -o "${enable_gtk3+set}" = set || enable_gtk3=yes)
 
-AC_ARG_ENABLE(gtk4,
-    AS_HELP_STRING([--enable-gtk4],
-        [Determines whether to use Gtk+ 4.0 vclplug on platforms where Gtk+ 4.0 is available.]))
-
 AC_ARG_ENABLE(introspection,
     AS_HELP_STRING([--enable-introspection],
         [Generate files for GObject introspection.  Requires --enable-gtk3.  (Typically used by
@@ -1857,9 +1856,10 @@ libo_FUZZ_ARG_ENABLE(sdremote,
 ,test "${enable_sdremote+set}" = set || enable_sdremote=yes)
 
 libo_FUZZ_ARG_ENABLE(sdremote-bluetooth,
-    AS_HELP_STRING([--disable-sdremote-bluetooth],
-        [Determines whether to build sdremote with bluetooth support.
-         Requires dbus on Linux.]))
+    AS_HELP_STRING([--enable-sdremote-bluetooth],
+        [Build sdremote with bluetooth support. Requires dbus on Linux.
+         Disabled by default.]),
+,enable_sdremote_bluetooth=no)
 
 libo_FUZZ_ARG_ENABLE(gio,
     AS_HELP_STRING([--disable-gio],
@@ -2122,14 +2122,6 @@ AC_ARG_WITH(wasm-module,
 , [with_wasm_module='calc writer'])
 # Don't include impress by default. Debug builds become too large for Chromium
 # with 'calc impress writer' enabled. (buffer source exceeds maximum size)
-
-if test "$_os" = Emscripten; then
-    AC_ARG_ENABLE(emscripten-jspi,
-        AS_HELP_STRING([--enable-emscripten-jspi],
-            [Experimentally enable use of the Emscripten -sJSPI feature.]))
-else
-    enable_emscripten_jspi=
-fi
 
 if test "$_os" = Emscripten; then
     AC_ARG_ENABLE(emscripten-proxy-to-pthread,
@@ -2561,6 +2553,12 @@ AC_ARG_WITH(export-validation,
         [Disable validating OOXML and ODF files as exported from in-tree tests.]),
 ,with_export_validation=auto)
 
+AC_ARG_ENABLE(cofficeotron,
+    AS_HELP_STRING([--enable-cofficeotron],
+        [Build the native cofficeotron document validator, and use it in
+         place of the Java officeotron when export validation runs.]),
+,enable_cofficeotron=no)
+
 AC_ARG_WITH(bffvalidator,
     AS_HELP_STRING([--with-bffvalidator=<absolute path to BFFValidator>],
         [Enables export validation for Microsoft Binary formats (doc, xls, ppt).
@@ -2771,7 +2769,9 @@ AC_ARG_WITH(load-limit,
     AS_HELP_STRING([--with-load-limit=N],
         [Pass -l N to make so that no new job is started if the system load
         average is >= N. Useful on shared CI hosts where multiple builds
-        compete for cores. No load limit by default.]),
+        compete for cores. Defaults to the number of processors on the build
+        host, so the limit tracks the machine rather than this build's own job
+        count. Pass --with-load-limit=no to build without any load limit.]),
 ,)
 
 AC_ARG_WITH(all-tarballs,
@@ -3986,14 +3986,6 @@ AC_SUBST(ENABLE_WASM_STRIP_BASIC_DRAW_MATH_IMPRESS)
 AC_SUBST(ENABLE_WASM_STRIP_CALC)
 AC_SUBST(ENABLE_WASM_STRIP_ACCESSIBILITY)
 
-if test "$enable_emscripten_jspi" = yes; then
-    ENABLE_EMSCRIPTEN_JSPI=TRUE
-    AC_DEFINE(HAVE_EMSCRIPTEN_JSPI)
-else
-    ENABLE_EMSCRIPTEN_JSPI=
-fi
-AC_SUBST(ENABLE_EMSCRIPTEN_JSPI)
-
 if test "$enable_emscripten_proxy_to_pthread" = yes; then
     ENABLE_EMSCRIPTEN_PROXY_TO_PTHREAD=TRUE
     AC_DEFINE(HAVE_EMSCRIPTEN_PROXY_TO_PTHREAD)
@@ -4231,6 +4223,7 @@ test_cl_exe()
 SOLARINC=
 MSBUILD_PATH=
 DEVENV=
+CMAKE=
 if test "$_os" = "WINNT"; then
     AC_MSG_CHECKING([Visual C++])
     find_msvc "$with_visual_studio"
@@ -4310,6 +4303,10 @@ if test "$_os" = "WINNT"; then
     else
         AC_MSG_ERROR([MSBuild.exe location not found])
     fi
+
+    # Find the cmake.exe in Visual Studio Extensions
+    PathFormat "$VC_PRODUCT_DIR/../Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe"
+    CMAKE="$formatted_path"
 
     # Find the version of devenv.exe
     PathFormat "$VC_PRODUCT_DIR/../Common7/IDE/devenv.exe"
@@ -4414,6 +4411,7 @@ if test "$_os" = "WINNT"; then
 fi
 AC_SUBST(VCVER)
 AC_SUBST(VCTOOLSET)
+AC_SUBST(CMAKE)
 AC_SUBST(DEVENV)
 AC_SUBST(MSVC_CXX)
 
@@ -4586,6 +4584,15 @@ AC_SUBST(GCC_VERSION)
 
 dnl Set the ENABLE_DBGUTIL variable
 dnl ===================================================================
+dnl
+dnl On Windows treat --enable-debug the same as --enable-dbgutil. This matches the CODA Visual
+dnl Studio project better which has only a choice between Debug and Release anyway. Debug in CODA is
+dnl like dbgutil in engine. As we link some static C++ libraries (Poco) built in engine with the
+dnl CODA code they must match in C++ runtime used.
+dnl
+if test "$_os" = "WINNT" -a "$enable_debug" = "yes"; then
+    enable_dbgutil=yes
+fi
 AC_MSG_CHECKING([whether to build with additional debug utilities])
 if test -n "$enable_dbgutil" -a "$enable_dbgutil" != "no"; then
     ENABLE_DBGUTIL="TRUE"
@@ -4818,6 +4825,37 @@ fi
 AC_SUBST(LLD_LINK)
 AC_SUBST(USE_LD)
 AC_SUBST(LD)
+
+dnl ===================================================================
+dnl Check whether the linker supports -debug:fastlink, which links debug
+dnl builds faster. link.exe offered it from VS 2017 to VS 2022 and dropped it
+dnl in the VS 2026 toolset; lld-link never had it. Both then warn on every
+dnl link and fall back to -debug:full, so probe the linker that will be used,
+dnl and only pass the flag when it takes it silently.
+dnl ===================================================================
+HAVE_LINK_DEBUG_FASTLINK=
+if test "$_os" = "WINNT"; then
+    AC_MSG_CHECKING([whether the linker supports -debug:fastlink])
+    if test -n "$LLD_LINK"; then
+        fastlink_linker=$LLD_LINK
+    else
+        dnl PATH doesn't cover the MSVC tools yet; link.exe sits next to cl.exe
+        fastlink_linker=`win_short_path_for_make "$MSVC_HOST_PATH/link.exe"`
+    fi
+    dnl the link fails on the missing input file, and any mention of the flag in
+    dnl the output is a complaint about the flag itself: not being able to use it
+    if "$fastlink_linker" -debug:fastlink conftest-nonexistent.obj 2>&1 | grep -iq "debug:fastlink"; then
+        HAVE_LINK_DEBUG_FASTLINK=
+    else
+        HAVE_LINK_DEBUG_FASTLINK=TRUE
+    fi
+    if test -n "$HAVE_LINK_DEBUG_FASTLINK"; then
+        AC_MSG_RESULT([yes])
+    else
+        AC_MSG_RESULT([no])
+    fi
+fi
+AC_SUBST(HAVE_LINK_DEBUG_FASTLINK)
 
 HAVE_LD_BSYMBOLIC_FUNCTIONS=
 if test "$GCC" = "yes" -a "$_os" != Emscripten ; then
@@ -5952,7 +5990,6 @@ if test "$cross_compiling" = "yes"; then
         --disable-cups \
         --disable-customtarget-components \
         --disable-gtk3 \
-        --disable-gtk4 \
         --disable-libcmis \
         --disable-nss \
         --disable-online-update \
@@ -9221,6 +9258,17 @@ AC_SUBST(MODULAR_JAVA)
 
 
 dnl ===================================================================
+dnl cofficeotron document validator
+dnl ===================================================================
+AC_MSG_CHECKING([whether to build the native cofficeotron validator])
+if test "$enable_cofficeotron" = "yes"; then
+    AC_MSG_RESULT([yes])
+    BUILD_TYPE="$BUILD_TYPE COFFICEOTRON RNV"
+else
+    AC_MSG_RESULT([no])
+fi
+
+dnl ===================================================================
 dnl Export file validation
 dnl ===================================================================
 AC_MSG_CHECKING([whether to enable export file validation])
@@ -9280,27 +9328,32 @@ if test "$with_export_validation" != "no"; then
             AC_SUBST(ODFVALIDATOR)
 
 
-            AC_PATH_PROGS(OFFICEOTRON, officeotron)
-            if test -z "$OFFICEOTRON"; then
-                # remember to download the officeotron with validator later
-                AC_MSG_NOTICE([no officeotron found, will download it])
-                BUILD_TYPE="$BUILD_TYPE OFFICEOTRON"
+            if test "$enable_cofficeotron" = "yes"; then
+                dnl The native cofficeotron validates the OOXML exports; an
+                dnl empty OFFICEOTRON_JAR makes bin/officeotron.sh run it.
                 OFFICEOTRON="$BUILDDIR/bin/officeotron.sh"
-
-                # and fetch name of officeotron jar name from download.lst
-                OFFICEOTRON_JAR=`$SED -n -e "s/^OFFICEOTRON_JAR *:= *\(.*\) */\1/p" $SRC_ROOT/download.lst`
-                AC_SUBST(OFFICEOTRON_JAR)
-
-                if test -z "$OFFICEOTRON_JAR"; then
-                    AC_MSG_ERROR([cannot determine officeotron jar location (--with-export-validation)])
-                fi
             else
-                # check version of existing officeotron
-                OFFICEOTRON_VER=`$OFFICEOTRON --version | $AWK -F. '{ print \$1*10000+\$2*100+\$3 }'`
-                if test 0"$OFFICEOTRON_VER" -lt 704; then
-                    AC_MSG_ERROR([officeotron too old])
+                AC_PATH_PROGS(OFFICEOTRON, officeotron)
+                if test -z "$OFFICEOTRON"; then
+                    # remember to download the officeotron with validator later
+                    AC_MSG_NOTICE([no officeotron found, will download it])
+                    BUILD_TYPE="$BUILD_TYPE OFFICEOTRON"
+                    OFFICEOTRON="$BUILDDIR/bin/officeotron.sh"
+
+                    # and fetch name of officeotron jar name from download.lst
+                    OFFICEOTRON_JAR=`$SED -n -e "s/^OFFICEOTRON_JAR *:= *\(.*\) */\1/p" $SRC_ROOT/download.lst`
+                    if test -z "$OFFICEOTRON_JAR"; then
+                        AC_MSG_ERROR([cannot determine officeotron jar location (--with-export-validation)])
+                    fi
+                else
+                    # check version of existing officeotron
+                    OFFICEOTRON_VER=`$OFFICEOTRON --version | $AWK -F. '{ print \$1*10000+\$2*100+\$3 }'`
+                    if test 0"$OFFICEOTRON_VER" -lt 704; then
+                        AC_MSG_ERROR([officeotron too old])
+                    fi
                 fi
             fi
+            AC_SUBST(OFFICEOTRON_JAR)
             if test "$build_os" = "cygwin"; then
                 # In case of Cygwin it will be executed from Windows,
                 # so we need to run bash and absolute path to validator
@@ -10095,10 +10148,14 @@ else
     SYSTEM_LIBXML=
     LIBXML_CFLAGS="-I${WORKDIR}/UnpackedTarball/libxml2/include"
     if test "$COM" = "MSC"; then
-        LIBXML_CFLAGS="${LIBXML_CFLAGS} -I${WORKDIR}/UnpackedTarball/icu/source/i18n -I${WORKDIR}/UnpackedTarball/icu/source/common"
+        LIBXML_CFLAGS="${LIBXML_CFLAGS} -I${WORKDIR}/UnpackedTarball/libxml2 -I${WORKDIR}/UnpackedTarball/icu/source/i18n -I${WORKDIR}/UnpackedTarball/icu/source/common"
     fi
     if test "$COM" = "MSC"; then
-        LIBXML_LIBS="${WORKDIR}/UnpackedTarball/libxml2/win32/bin.msvc/libxml2.lib"
+        if test "$MSVC_USE_DEBUG_RUNTIME" = TRUE; then
+            LIBXML_LIBS="${WORKDIR}/UnpackedTarball/libxml2/Debug/libxml2d.lib"
+        else
+            LIBXML_LIBS="${WORKDIR}/UnpackedTarball/libxml2/Release/libxml2.lib"
+        fi
     else
         LIBXML_LIBS="-L${WORKDIR}/UnpackedTarball/libxml2/.libs -lxml2"
         if test "$DISABLE_DYNLOADING" = TRUE; then
@@ -11518,7 +11575,6 @@ R=""
 
 libo_ENABLE_VCLPLUG([gen])
 libo_ENABLE_VCLPLUG([gtk3])
-libo_ENABLE_VCLPLUG([gtk4])
 
 if test "$_os" = "WINNT"; then
     R="$R win"
@@ -11584,36 +11640,13 @@ AC_SUBST(GTK3_LIBS)
 AC_SUBST(GTK3_CFLAGS)
 AC_SUBST(ENABLE_GTKTILEDVIEWER)
 
-GTK4_CFLAGS=""
-GTK4_LIBS=""
-if test "$test_gtk4" = yes -a "x$enable_gtk4" = "xyes"; then
-    if test "$with_system_cairo" = no; then
-        add_warning 'Non-system cairo combined with gtk4 is assumed to cause trouble; proceed at your own risk.'
-    fi
-    : ${with_system_cairo:=yes}
-    PKG_CHECK_MODULES(GTK4, gtk4 >= 4.10 gmodule-no-export-2.0 glib-2.0 >= 2.38 cairo)
-    GTK4_CFLAGS=$(printf '%s' "$GTK4_CFLAGS" | sed -e "s/-I/${ISYSTEM?}/g")
-    GTK4_CFLAGS="$GTK4_CFLAGS -DGDK_DISABLE_DEPRECATED -DGTK_DISABLE_DEPRECATED"
-    FilterLibs "${GTK4_LIBS}"
-    GTK4_LIBS="${filteredlibs}"
-
-    dnl We require egl only for the gtk4 plugin. Otherwise we use glx.
-    if test "$with_system_epoxy" != "yes"; then
-        AC_CHECK_LIB(EGL, eglMakeCurrent, [:], AC_MSG_ERROR([libEGL required.]))
-        AC_CHECK_HEADER(EGL/eglplatform.h, [],
-                        [AC_MSG_ERROR(EGL headers not found. install mesa-libEGL-devel)], [])
-    fi
-fi
-AC_SUBST(GTK4_LIBS)
-AC_SUBST(GTK4_CFLAGS)
-
 # libintl is only needed to register .mo files with bindtextdomain so that GTK
 # dialogs can find translations. Without GTK there is no point.
 # On musl, <libintl.h> from gettext-dev redefines bindtextdomain to
 # libintl_bindtextdomain which requires linking -lintl; on glibc it is in libc.
 LIBINTL_LIBS=
 USE_LIBINTL=
-if test "$ENABLE_GTK3" = "TRUE" -o "$ENABLE_GTK4" = "TRUE"; then
+if test "$ENABLE_GTK3" = "TRUE"; then
     USE_LIBINTL=TRUE
     save_LIBS="$LIBS"
     AC_SEARCH_LIBS([libintl_bindtextdomain], [intl],
@@ -11755,7 +11788,7 @@ AC_SUBST(SYSTEM_BLUEZ)
 dnl ===================================================================
 dnl Check whether to enable GIO support
 dnl ===================================================================
-if test "$ENABLE_GTK4" = "TRUE" -o "$ENABLE_GTK3" = "TRUE"; then
+if test "$ENABLE_GTK3" = "TRUE"; then
     AC_MSG_CHECKING([whether to enable GIO support])
     if test "$_os" != "WINNT" -a "$_os" != "Darwin" -a "$enable_gio" = "yes"; then
         dnl Need at least 2.26 for the dbus support.
@@ -13495,6 +13528,26 @@ AC_SUBST([DEPS_SYSINCLUDES])
 dnl ===================================================================
 dnl Number of CPUs to use during the build
 dnl ===================================================================
+dnl Count the online processors on the build host once. This sets both the
+dnl default job count (-j) and, further down, the default load limit (-l).
+case `uname -s` in
+
+Darwin|FreeBSD|NetBSD|OpenBSD)
+    NPROC=`sysctl -n hw.ncpu`
+    ;;
+
+Linux)
+    NPROC=`getconf _NPROCESSORS_ONLN`
+    ;;
+# what else than above does profit here *and* has /proc?
+*)
+    NPROC=`grep '^processor[[[:space:]]]*:' /proc/cpuinfo | wc -l`
+    ;;
+esac
+
+# If we hit the catch-all case, but /proc/cpuinfo doesn't exist or has an
+# unexpected format, 'wc -l' will have returned 0 (and we won't use -j at all).
+
 AC_MSG_CHECKING([for number of processors to use])
 # plain --with-parallelism is just the default
 if test -n "$with_parallelism" -a "$with_parallelism" != "yes"; then
@@ -13503,28 +13556,10 @@ if test -n "$with_parallelism" -a "$with_parallelism" != "yes"; then
     else
         PARALLELISM=$with_parallelism
     fi
+elif test "$enable_icecream" = "yes"; then
+    PARALLELISM="40"
 else
-    if test "$enable_icecream" = "yes"; then
-        PARALLELISM="40"
-    else
-        case `uname -s` in
-
-        Darwin|FreeBSD|NetBSD|OpenBSD)
-            PARALLELISM=`sysctl -n hw.ncpu`
-            ;;
-
-        Linux)
-            PARALLELISM=`getconf _NPROCESSORS_ONLN`
-        ;;
-        # what else than above does profit here *and* has /proc?
-        *)
-            PARALLELISM=`grep '^processor[[[:space:]]]*:' /proc/cpuinfo | wc -l`
-            ;;
-        esac
-
-        # If we hit the catch-all case, but /proc/cpuinfo doesn't exist or has an
-        # unexpected format, 'wc -l' will have returned 0 (and we won't use -j at all).
-    fi
+    PARALLELISM=$NPROC
 fi
 
 if test $PARALLELISM -eq 0; then
@@ -13535,9 +13570,15 @@ fi
 AC_SUBST(PARALLELISM)
 
 AC_MSG_CHECKING([for make load limit])
-if test -n "$with_load_limit" -a "$with_load_limit" != "no" -a "$with_load_limit" != "yes"; then
+if test "$with_load_limit" = "no"; then
+    LOADLIMIT=
+    AC_MSG_RESULT([none])
+elif test -n "$with_load_limit" -a "$with_load_limit" != "yes"; then
     LOADLIMIT=$with_load_limit
     AC_MSG_RESULT([$LOADLIMIT])
+elif test -n "$NPROC" -a "$NPROC" != "0" -a "$PARALLELISM" != "0"; then
+    LOADLIMIT=$NPROC
+    AC_MSG_RESULT([$LOADLIMIT (default, one per processor)])
 else
     LOADLIMIT=
     AC_MSG_RESULT([none])

@@ -54,7 +54,7 @@ class UNLESS_MERGELIBS(COMPHELPER_DLLPUBLIC) NumberedCollection final :
 
         struct TNumberedItem
         {
-            css::uno::WeakReference< css::uno::XInterface > xItem;
+            cpo::uno::WeakReference< css::uno::XInterface > xItem;
             ::sal_Int32 nNumber;
         };
 
@@ -106,19 +106,19 @@ class UNLESS_MERGELIBS(COMPHELPER_DLLPUBLIC) NumberedCollection final :
 
 
         /** @see css.frame.XUntitledNumbers */
-        virtual ::sal_Int32 SAL_CALL leaseNumber(const css::uno::Reference< css::uno::XInterface >& xComponent) override;
+        virtual ::sal_Int32 leaseNumber(const css::uno::Reference< css::uno::XInterface >& xComponent) override;
 
 
         /** @see css.frame.XUntitledNumbers */
-        virtual void SAL_CALL releaseNumber(::sal_Int32 nNumber) override;
+        virtual void releaseNumber(::sal_Int32 nNumber) override;
 
 
         /** @see css.frame.XUntitledNumbers */
-        virtual void SAL_CALL releaseNumberForComponent(const css::uno::Reference< css::uno::XInterface >& xComponent) override;
+        virtual void releaseNumberForComponent(const css::uno::Reference< css::uno::XInterface >& xComponent) override;
 
 
         /** @see css.frame.XUntitledNumbers */
-        virtual OUString SAL_CALL getUntitledPrefix() override;
+        virtual OUString getUntitledPrefix() override;
 
 
     // internal
@@ -157,7 +157,7 @@ class UNLESS_MERGELIBS(COMPHELPER_DLLPUBLIC) NumberedCollection final :
         TNumberedItemHash m_lComponents;
 
         /// used as source of broadcasted messages or exceptions (can be null !)
-        css::uno::WeakReference< css::uno::XInterface > m_xOwner;
+        cpo::uno::WeakReference< css::uno::XInterface > m_xOwner;
 
         std::mutex m_aMutex;
 };

@@ -254,10 +254,10 @@
 #include <cpo/uno/Sequence.hxx>
 #include <cpo/uno/Type.h>
 #include <cpo/uno/Type.hxx>
-#include <com/sun/star/uno/TypeClass.hdl>
+#include <cpo/uno/TypeClass.hdl>
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/uno/XInterface.hpp>
-#include <com/sun/star/uno/genfunc.hxx>
+#include <cpo/uno/genfunc.hxx>
 #include <com/sun/star/util/DateTime.hpp>
 #include <com/sun/star/util/URLTransformer.hpp>
 #include <com/sun/star/util/XCloneable.hpp>
@@ -289,7 +289,6 @@
 #include <controller/SlsSelectionObserver.hxx>
 #include <controller/SlsSlotManager.hxx>
 #include <controller/SlsVisibleAreaManager.hxx>
-#include <cppcanvas/vclfactory.hxx>
 #include <cppu/cppudllapi.h>
 #include <cppu/unotype.hxx>
 #include <cppuhelper/basemutex.hxx>

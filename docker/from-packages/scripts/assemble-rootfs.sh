@@ -32,7 +32,7 @@ FILELIST=/tmp/rootfs.files
 #   fontconfig      - postinst uses fc-cache to build the font cache that goes
 #                     into systemplate; the fontconfig tools are not used at runtime
 #   cpio            - postinst uses it to run coolwsd-systemplate-setup
-BUILD_ONLY="libcap2-bin ca-certificates adduser fontconfig cpio"
+BUILD_ONLY="libcap2-bin ca-certificates adduser fontconfig cpio locales"
 
 # Packages pulled in transitively (mostly by the fontconfig build tool and
 # ca-certificates) that are not needed at runtime, because the engine links its
@@ -69,12 +69,19 @@ echo "Shipping the files of these packages:"
 sed 's/^/  /' "$PKGS_ADDED"
 
 echo "=== Building the file list ==="
-# dpkg -L lists files, symlinks and directories; keep only files and symlinks.
+# dpkg -L lists files, symlinks and directories; keep files and symlinks, plus
+# package-owned empty directories (populated dirs are recreated by tar from the
+# files they contain).
 while read -r pkg; do
     dpkg-query -L "$pkg"
 done < "$PKGS_ADDED" \
     | while read -r path; do
         if [ -f "$path" ] || [ -L "$path" ]; then
+            printf '%s\n' "$path"
+        elif [ -d "$path" ] && [ -z "$(ls -A "$path" 2>/dev/null)" ]; then
+            # keep package-owned empty dirs (deliberate placeholders such as
+            # the shared-preset buckets share/autotext/common and
+            # share/template/common/presnt); a files-only list would drop them
             printf '%s\n' "$path"
         fi
       done | sort -u > "$FILELIST"
@@ -222,6 +229,18 @@ install -D -m 0644 /etc/group  "$ROOTFS/etc/group"
 # world-writable /tmp exists in the distroless image.
 install -d -m 1777 "$ROOTFS/tmp"
 
+# The distroless base ships no locale data, so glibc cannot provide a UTF-8
+# locale; coolwsd then falls back to plain C and cannot open documents with
+# non-ASCII file names. Generate a minimal C.UTF-8 into the archive glibc
+# reads - the standard /usr/lib/locale/locale-archive (this base's glibc does
+# not honour $LOCALE_ARCHIVE). C.UTF-8 has no localedef source of its own (it
+# is a glibc built-in the Nix-built base lacks), so build it from the C locale
+# with the UTF-8 charmap. The locales package (charmaps) is build-only.
+echo "=== Generating C.UTF-8 locale archive ==="
+rm -f /usr/lib/locale/locale-archive
+localedef -i C -c -f UTF-8 C.UTF-8
+install -D -m 0644 /usr/lib/locale/locale-archive "$ROOTFS/usr/lib/locale/locale-archive"
+
 # Replace the jail's glibc loader / NSS / resolver objects and the CA trust
 # store with the target (base) image's own copies, when the build provides the
 # base under HARDENED_ROOT. These are dlopen'd at runtime by the in-jail
@@ -251,12 +270,17 @@ if [ -n "${HARDENED_ROOT:-}" ]; then
             i=$((i + 1))
         done
         [ -f "$HARDENED_ROOT$p" ] && printf '%s\n' "$HARDENED_ROOT$p"
+        return 0
     }
+
+    # Multiarch triple of the image being built (x86_64-linux-gnu,
+    # aarch64-linux-gnu, ...), so the overlay works on every architecture.
+    triple="$(uname -m)-linux-gnu"
 
     overlay_from_target() {  # $1 = file in the template to replace
         _b=$(basename "$1")
-        _src=$(resolve_in_target "/usr/lib/x86_64-linux-gnu/$_b")
-        [ -z "$_src" ] && _src=$(resolve_in_target "/lib/x86_64-linux-gnu/$_b")
+        _src=$(resolve_in_target "/usr/lib/$triple/$_b")
+        [ -z "$_src" ] && _src=$(resolve_in_target "/lib/$triple/$_b")
         [ -z "$_src" ] && _src=$(resolve_in_target "/lib64/$_b")
         if [ -n "$_src" ]; then
             cp -f --preserve=mode,timestamps "$_src" "$1"

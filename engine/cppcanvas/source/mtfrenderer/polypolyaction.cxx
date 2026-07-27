@@ -39,7 +39,7 @@
 
 using namespace ::com::sun::star;
 
-namespace cppcanvas::internal
+namespace cppcanvas
 {
         namespace
         {
@@ -83,7 +83,7 @@ namespace cppcanvas::internal
                                             bool                                bFill,
                                             bool                                bStroke ) :
                 CachedPrimitiveBase( rCanvas, false ),
-                mxPolyPoly( ::basegfx::unotools::xPolyPolygonFromB2DPolyPolygon( rCanvas->getUNOCanvas()->getDevice(), rPolyPoly) ),
+                mxPolyPoly( ::canvastools::xPolyPolygonFromB2DPolyPolygon( rCanvas->getUNOCanvas()->getDevice(), rPolyPoly) ),
                 mpCanvas( rCanvas )
             {
                 cppcanvastools::initRenderState(maState,rState);
@@ -102,7 +102,7 @@ namespace cppcanvas::internal
                                             bool                                bStroke,
                                             int                                 nTransparency ) :
                 CachedPrimitiveBase( rCanvas, false ),
-                mxPolyPoly( ::basegfx::unotools::xPolyPolygonFromB2DPolyPolygon( rCanvas->getUNOCanvas()->getDevice(), rPolyPoly) ),
+                mxPolyPoly( ::canvastools::xPolyPolygonFromB2DPolyPolygon( rCanvas->getUNOCanvas()->getDevice(), rPolyPoly) ),
                 mpCanvas( rCanvas )
             {
                 cppcanvastools::initRenderState(maState,rState);
@@ -135,8 +135,8 @@ namespace cppcanvas::internal
             bool PolyPolyAction::renderPrimitive( uno::Reference< rendering::XCachedPrimitive >& rCachedPrimitive,
                                                   const ::basegfx::B2DHomMatrix&                 rTransformation ) const
             {
-                SAL_INFO( "cppcanvas.emf", "::cppcanvas::internal::PolyPolyAction::renderPrimitive()" );
-                SAL_INFO( "cppcanvas.emf", "::cppcanvas::internal::PolyPolyAction: 0x" << std::hex << this );
+                SAL_INFO( "cppcanvas.emf", "::cppcanvas::PolyPolyAction::renderPrimitive()" );
+                SAL_INFO( "cppcanvas.emf", "::cppcanvas::PolyPolyAction: 0x" << std::hex << this );
 
                 rendering::RenderState aLocalState( maState );
                 ::canvastools::prependToRenderState(aLocalState, rTransformation);
@@ -157,9 +157,9 @@ namespace cppcanvas::internal
 
                 if( aLocalState.DeviceColor.hasElements() )
                 {
-                    rCachedPrimitive = mpCanvas->getUNOCanvas()->drawPolyPolygon( mxPolyPoly,
-                                                                                  mpCanvas->getViewState(),
-                                                                                  aLocalState );
+                    mpCanvas->getUNOCanvas()->drawPolyPolygon( mxPolyPoly,
+                                                              mpCanvas->getViewState(),
+                                                              aLocalState );
                 }
 
                 return true;
@@ -219,7 +219,7 @@ namespace cppcanvas::internal
                                                             const OutDevState&               rState,
                                                             const rendering::Texture&        rTexture ) :
                 CachedPrimitiveBase( rCanvas, true ),
-                mxPolyPoly( ::basegfx::unotools::xPolyPolygonFromB2DPolyPolygon( rCanvas->getUNOCanvas()->getDevice(), rPolyPoly) ),
+                mxPolyPoly( ::canvastools::xPolyPolygonFromB2DPolyPolygon( rCanvas->getUNOCanvas()->getDevice(), rPolyPoly) ),
                 mpCanvas( rCanvas ),
                 maTexture( rTexture )
             {
@@ -229,8 +229,8 @@ namespace cppcanvas::internal
             bool TexturedPolyPolyAction::renderPrimitive( uno::Reference< rendering::XCachedPrimitive >& rCachedPrimitive,
                                                           const ::basegfx::B2DHomMatrix&                 rTransformation ) const
             {
-                SAL_INFO( "cppcanvas.emf", "::cppcanvas::internal::PolyPolyAction::renderPrimitive()" );
-                SAL_INFO( "cppcanvas.emf", "::cppcanvas::internal::PolyPolyAction: 0x" << std::hex << this );
+                SAL_INFO( "cppcanvas.emf", "::cppcanvas::PolyPolyAction::renderPrimitive()" );
+                SAL_INFO( "cppcanvas.emf", "::cppcanvas::PolyPolyAction: 0x" << std::hex << this );
 
                 rendering::RenderState aLocalState( maState );
                 ::canvastools::prependToRenderState(aLocalState, rTransformation);
@@ -296,7 +296,7 @@ namespace cppcanvas::internal
                                                           const OutDevState&                    rState,
                                                           rendering::StrokeAttributes           aStrokeAttributes ) :
                 CachedPrimitiveBase( rCanvas, false ),
-                mxPolyPoly( ::basegfx::unotools::xPolyPolygonFromB2DPolyPolygon( rCanvas->getUNOCanvas()->getDevice(), rPolyPoly) ),
+                mxPolyPoly( ::canvastools::xPolyPolygonFromB2DPolyPolygon( rCanvas->getUNOCanvas()->getDevice(), rPolyPoly) ),
                 mpCanvas( rCanvas ),
                 maStrokeAttributes(std::move( aStrokeAttributes ))
             {
@@ -304,19 +304,19 @@ namespace cppcanvas::internal
                 maState.DeviceColor = rState.lineColor;
             }
 
-            bool StrokedPolyPolyAction::renderPrimitive( uno::Reference< rendering::XCachedPrimitive >& rCachedPrimitive,
+            bool StrokedPolyPolyAction::renderPrimitive( uno::Reference< rendering::XCachedPrimitive >& /*rCachedPrimitive*/,
                                                          const ::basegfx::B2DHomMatrix&                 rTransformation ) const
             {
-                SAL_INFO( "cppcanvas.emf", "::cppcanvas::internal::PolyPolyAction::renderPrimitive()" );
-                SAL_INFO( "cppcanvas.emf", "::cppcanvas::internal::PolyPolyAction: 0x" << std::hex << this );
+                SAL_INFO( "cppcanvas.emf", "::cppcanvas::PolyPolyAction::renderPrimitive()" );
+                SAL_INFO( "cppcanvas.emf", "::cppcanvas::PolyPolyAction: 0x" << std::hex << this );
 
                 rendering::RenderState aLocalState( maState );
                 ::canvastools::prependToRenderState(aLocalState, rTransformation);
 
-                rCachedPrimitive = mpCanvas->getUNOCanvas()->strokePolyPolygon( mxPolyPoly,
-                                                                                mpCanvas->getViewState(),
-                                                                                aLocalState,
-                                                                                maStrokeAttributes );
+                mpCanvas->getUNOCanvas()->strokePolyPolygon( mxPolyPoly,
+                                                            mpCanvas->getViewState(),
+                                                            aLocalState,
+                                                            maStrokeAttributes );
                 return true;
             }
 

@@ -17,17 +17,16 @@
  *   the License at http://www.apache.org/licenses/LICENSE-2.0 .
  */
 
+#include <com/sun/star/beans/XFastPropertySet.hpp>
 #include <com/sun/star/geometry/RealSize2D.hpp>
 #include <com/sun/star/geometry/IntegerSize2D.hpp>
 #include <com/sun/star/geometry/IntegerPoint2D.hpp>
 #include <com/sun/star/geometry/IntegerRectangle2D.hpp>
 
-#include <com/sun/star/rendering/ColorSpaceType.hpp>
-#include <com/sun/star/rendering/RenderingIntent.hpp>
 #include <com/sun/star/rendering/VolatileContentDestroyedException.hpp>
 #include <com/sun/star/rendering/XBitmap.hpp>
-#include <com/sun/star/rendering/IntegerBitmapLayout.hpp>
 #include <com/sun/star/rendering/ColorComponentTag.hpp>
+#include <com/sun/star/rendering/ARGBColor.hpp>
 
 #include <basegfx/point/b2dpoint.hxx>
 #include <basegfx/vector/b2dsize.hxx>
@@ -56,100 +55,7 @@ namespace vcl::unotools
             return new vcl::unotools::VclCanvasBitmap( inputBitmap );
         }
 
-        namespace
-        {
-            bool equalsLayout( const rendering::IntegerBitmapLayout& rLHS,
-                                    const rendering::IntegerBitmapLayout& rRHS )
-            {
-                return
-                    rLHS.ScanLineBytes       == rRHS.ScanLineBytes &&
-                    rLHS.ScanLineStride      == rRHS.ScanLineStride &&
-                    rLHS.PlaneStride         == rRHS.PlaneStride &&
-                    rLHS.ColorSpace          == rRHS.ColorSpace &&
-                    rLHS.Palette             == rRHS.Palette &&
-                    rLHS.IsMsbFirst          == rRHS.IsMsbFirst;
-            }
-            bool readBmp( sal_Int32                                                  nWidth,
-                          sal_Int32                                                  nHeight,
-                          const rendering::IntegerBitmapLayout&                      rLayout,
-                          const uno::Reference< rendering::XIntegerReadOnlyBitmap >& xInputBitmap,
-                          BitmapScopedWriteAccess&                                   rWriteAcc,
-                          bool bHasAlpha )
-            {
-                rendering::IntegerBitmapLayout      aCurrLayout;
-                geometry::IntegerRectangle2D        aRect;
-                cpo::uno::Sequence<sal_Int8>             aPixelData;
-                cpo::uno::Sequence<rendering::RGBColor>  aRGBColors;
-                cpo::uno::Sequence<rendering::ARGBColor> aARGBColors;
-
-                for( aRect.Y1=0; aRect.Y1<nHeight; ++aRect.Y1 )
-                {
-                    aRect.X1 = 0; aRect.X2 = nWidth; aRect.Y2 = aRect.Y1+1;
-                    try
-                    {
-                        aPixelData = xInputBitmap->getData(aCurrLayout,aRect);
-                    }
-                    catch( rendering::VolatileContentDestroyedException& )
-                    {
-                        // re-read bmp from the start
-                        return false;
-                    }
-                    if( !equalsLayout(aCurrLayout, rLayout) )
-                        return false; // re-read bmp from the start
-
-                    Scanline pScanline = rWriteAcc->GetScanline( aRect.Y1 );
-                    if( bHasAlpha )
-                    {
-                        // read ARGB color
-                        aARGBColors = rLayout.ColorSpace->convertIntegerToARGB(aPixelData);
-
-                        assert( !rWriteAcc->HasPalette() );
-                        for( sal_Int32 x=0; x<nWidth; ++x )
-                        {
-                            const rendering::ARGBColor& rColor=aARGBColors[x];
-                            rWriteAcc->SetPixelOnData( pScanline, x,
-                                                 BitmapColor( ColorAlpha,
-                                                              toByteColor(rColor.Red),
-                                                              toByteColor(rColor.Green),
-                                                              toByteColor(rColor.Blue),
-                                                              toByteColor(rColor.Alpha) ));
-                        }
-                    }
-                    else
-                    {
-                        // read RGB color
-                        aRGBColors = rLayout.ColorSpace->convertIntegerToRGB(aPixelData);
-                        if( rWriteAcc->HasPalette() )
-                        {
-                            for( sal_Int32 x=0; x<nWidth; ++x )
-                            {
-                                const rendering::RGBColor& rColor=aRGBColors[x];
-                                rWriteAcc->SetPixelOnData( pScanline, x,
-                                                     BitmapColor(static_cast<sal_uInt8>(rWriteAcc->GetBestPaletteIndex(
-                                                         BitmapColor( toByteColor(rColor.Red),
-                                                                      toByteColor(rColor.Green),
-                                                                      toByteColor(rColor.Blue))))) );
-                            }
-                        }
-                        else
-                        {
-                            for( sal_Int32 x=0; x<nWidth; ++x )
-                            {
-                                const rendering::RGBColor& rColor=aRGBColors[x];
-                                rWriteAcc->SetPixelOnData( pScanline, x,
-                                                     BitmapColor( toByteColor(rColor.Red),
-                                                                  toByteColor(rColor.Green),
-                                                                  toByteColor(rColor.Blue) ));
-                            }
-                        }
-                    }
-                }
-
-                return true;
-            }
-        }
-
-        ::Bitmap bitmapFromXBitmap( const uno::Reference< rendering::XIntegerReadOnlyBitmap >& xInputBitmap )
+        ::Bitmap bitmapFromXBitmap( const uno::Reference< rendering::XBitmap >& xInputBitmap )
         {
             SAL_INFO( "vcl.helper", "vcl::unotools::bitmapExFromXBitmap()" );
 
@@ -161,122 +67,14 @@ namespace vcl::unotools
             if( pImplBitmap )
                 return pImplBitmap->getBitmap();
 
-            // retrieve data via UNO interface
-
-            // volatile bitmaps are a bit more complicated to read
-            // from...
-
-            // loop a few times, until successfully read (for XVolatileBitmap)
-            for( int i=0; i<10; ++i )
-            {
-                sal_Int32 nDepth=0;
-                bool bHasAlpha = false;
-                const rendering::IntegerBitmapLayout aLayout(
-                    xInputBitmap->getMemoryLayout());
-
-                OSL_ENSURE(aLayout.ColorSpace.is(),
-                           "Cannot convert image without color space!");
-                if( !aLayout.ColorSpace.is() )
-                    return ::Bitmap();
-
-                nDepth = aLayout.ColorSpace->getBitsPerPixel();
-
-                if( xInputBitmap->hasAlpha() )
-                {
-                    // determine alpha channel depth
-                    const cpo::uno::Sequence<sal_Int8> aTags(
-                        aLayout.ColorSpace->getComponentTags() );
-                    const sal_Int8* pStart(aTags.getConstArray());
-                    const std::size_t  nLen(aTags.getLength());
-                    const sal_Int8* pEnd(pStart+nLen);
-
-                    const std::ptrdiff_t nAlphaIndex =
-                        std::find(pStart,pEnd,
-                                  rendering::ColorComponentTag::ALPHA) - pStart;
-
-                    ENSURE_OR_THROW( nAlphaIndex < sal::static_int_cast<std::ptrdiff_t>(nLen),
-                        "bitmap has alpha, but alphaindex not valid");
-                    auto nAlphaBitCount = aLayout.ColorSpace->getComponentBitCounts()[nAlphaIndex];
-                    ENSURE_OR_THROW(nAlphaBitCount == 8, "unsupported alpha bit count");
-                    bHasAlpha = true;
-                    nDepth -= nAlphaBitCount;
-                }
-
-                BitmapPalette aPalette;
-                if( aLayout.Palette.is() )
-                {
-                    ENSURE_OR_THROW(!bHasAlpha, "unsupported");
-                    uno::Reference< rendering::XColorSpace > xPaletteColorSpace(
-                        aLayout.Palette->getColorSpace());
-                    ENSURE_OR_THROW(xPaletteColorSpace.is(),
-                                    "Palette without color space");
-
-                    const sal_Int32 nEntryCount( aLayout.Palette->getNumberOfEntries() );
-                    if( nEntryCount <= 256 )
-                    {
-                        if( nEntryCount <= 2 )
-                            nDepth = 1;
-                        else
-                            nDepth = 8;
-
-                        const sal_uInt16 nPaletteEntries(
-                            sal::static_int_cast<sal_uInt16>(
-                                std::min(sal_Int32(255), nEntryCount)));
-
-                        // copy palette entries
-                        aPalette.SetEntryCount(nPaletteEntries);
-                        uno::Reference<rendering::XBitmapPalette> xPalette( aLayout.Palette );
-                        uno::Reference<rendering::XColorSpace>    xPalColorSpace( xPalette->getColorSpace() );
-
-                        cpo::uno::Sequence<double> aPaletteEntry;
-                        for( sal_uInt16 j=0; j<nPaletteEntries; ++j )
-                        {
-                            bool b = xPalette->getIndex(aPaletteEntry,j);
-                            ENSURE_OR_THROW(b, "transparent entry in palette unsupported");
-                            cpo::uno::Sequence<rendering::RGBColor> aColors=xPalColorSpace->convertToRGB(aPaletteEntry);
-                            ENSURE_OR_THROW(aColors.getLength() == 1,
-                                            "Palette returned more or less than one entry");
-                            const rendering::RGBColor& rColor=aColors[0];
-                            aPalette[j] = BitmapColor(toByteColor(rColor.Red),
-                                                      toByteColor(rColor.Green),
-                                                      toByteColor(rColor.Blue));
-                        }
-                    }
-                }
-
-                const ::Size aPixelSize(
-                    sizeFromIntegerSize2D(xInputBitmap->getSize()));
-
-                // normalize bitcount
-                vcl::PixelFormat ePixelFormat;
-                if (bHasAlpha)
-                    ePixelFormat = vcl::PixelFormat::N32_BPP;
-                else if ( nDepth <= 8 )
-                    ePixelFormat = vcl::PixelFormat::N8_BPP;
-                else
-                    ePixelFormat = vcl::PixelFormat::N24_BPP;
-
-                ::Bitmap aBitmap( aPixelSize,
-                                  ePixelFormat,
-                                  aLayout.Palette.is() ? &aPalette : nullptr );
-
-                { // limit scoped access
-                    BitmapScopedWriteAccess pWriteAccess( aBitmap );
-                    ENSURE_OR_THROW(pWriteAccess.get() != nullptr,
-                                    "Cannot get write access to bitmap");
-
-                    const sal_Int32 nWidth(aPixelSize.Width());
-                    const sal_Int32 nHeight(aPixelSize.Height());
-
-                    if( !readBmp(nWidth,nHeight,aLayout,xInputBitmap,pWriteAccess,bHasAlpha) )
-                        continue;
-                } // limit scoped access
-
-                return aBitmap;
-            }
-
-            // failed to read data 10 times - bail out
-            return ::Bitmap();
+            // The only other possible implementation of XBitmap is
+            // vclcanvas::CanvasBitmap in canvas/source/vcl/canvasbitmap.cxx, which has a XFastPropertySet fast-path
+            uno::Reference<css::beans::XFastPropertySet> xFastProp(xInputBitmap, uno::UNO_QUERY_THROW);
+            cpo::uno::Any aAny = xFastProp->getFastPropertyValue(0);
+            sal_Int64 nBitmapPtr(0);
+            aAny >>= nBitmapPtr;
+            std::unique_ptr<Bitmap> pBitmap(reinterpret_cast<Bitmap*>(nBitmapPtr));
+            return *pBitmap;
         }
 
         geometry::RealSize2D size2DFromSize( const Size& rSize )
@@ -390,152 +188,6 @@ namespace vcl::unotools
                               rRectangle.X2, rRectangle.Y2 );
         }
 
-        namespace
-        {
-            class StandardColorSpace : public cppu::WeakImplHelper< css::rendering::XColorSpace >
-            {
-            private:
-                cpo::uno::Sequence< sal_Int8 > m_aComponentTags;
-
-                virtual ::sal_Int8 SAL_CALL getType(  ) override
-                {
-                    return rendering::ColorSpaceType::RGB;
-                }
-                virtual cpo::uno::Sequence< ::sal_Int8 > SAL_CALL getComponentTags(  ) override
-                {
-                    return m_aComponentTags;
-                }
-                virtual ::sal_Int8 SAL_CALL getRenderingIntent(  ) override
-                {
-                    return rendering::RenderingIntent::PERCEPTUAL;
-                }
-                virtual cpo::uno::Sequence< beans::PropertyValue > SAL_CALL getProperties(  ) override
-                {
-                    return cpo::uno::Sequence< beans::PropertyValue >();
-                }
-                virtual cpo::uno::Sequence< double > SAL_CALL convertColorSpace( const cpo::uno::Sequence< double >& deviceColor,
-                                                                            const uno::Reference< rendering::XColorSpace >& targetColorSpace ) override
-                {
-                    // TODO(P3): if we know anything about target
-                    // colorspace, this can be greatly sped up
-                    cpo::uno::Sequence<rendering::ARGBColor> aIntermediate(
-                        convertToARGB(deviceColor));
-                    return targetColorSpace->convertFromARGB(aIntermediate);
-                }
-                virtual cpo::uno::Sequence< rendering::RGBColor > SAL_CALL convertToRGB( const cpo::uno::Sequence< double >& deviceColor ) override
-                {
-                    const double*  pIn( deviceColor.getConstArray() );
-                    const std::size_t nLen( deviceColor.getLength() );
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::RGBColor > aRes(nLen/4);
-                    rendering::RGBColor* pOut( aRes.getArray() );
-                    for( std::size_t i=0; i<nLen; i+=4 )
-                    {
-                        *pOut++ = rendering::RGBColor(pIn[0],pIn[1],pIn[2]);
-                        pIn += 4;
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< rendering::ARGBColor > SAL_CALL convertToARGB( const cpo::uno::Sequence< double >& deviceColor ) override
-                {
-                    const double*  pIn( deviceColor.getConstArray() );
-                    const std::size_t nLen( deviceColor.getLength() );
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::ARGBColor > aRes(nLen/4);
-                    rendering::ARGBColor* pOut( aRes.getArray() );
-                    for( std::size_t i=0; i<nLen; i+=4 )
-                    {
-                        *pOut++ = rendering::ARGBColor(pIn[3],pIn[0],pIn[1],pIn[2]);
-                        pIn += 4;
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< rendering::ARGBColor > SAL_CALL convertToPARGB( const cpo::uno::Sequence< double >& deviceColor ) override
-                {
-                    const double*  pIn( deviceColor.getConstArray() );
-                    const std::size_t nLen( deviceColor.getLength() );
-                    ENSURE_ARG_OR_THROW2(nLen%4==0,
-                                         "number of channels no multiple of 4",
-                                         static_cast<rendering::XColorSpace*>(this), 0);
-
-                    cpo::uno::Sequence< rendering::ARGBColor > aRes(nLen/4);
-                    rendering::ARGBColor* pOut( aRes.getArray() );
-                    for( std::size_t i=0; i<nLen; i+=4 )
-                    {
-                        *pOut++ = rendering::ARGBColor(pIn[3],pIn[3]*pIn[0],pIn[3]*pIn[1],pIn[3]*pIn[2]);
-                        pIn += 4;
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< double > SAL_CALL convertFromRGB( const cpo::uno::Sequence< rendering::RGBColor >& rgbColor ) override
-                {
-                    const std::size_t             nLen( rgbColor.getLength() );
-
-                    cpo::uno::Sequence< double > aRes(nLen*4);
-                    double* pColors=aRes.getArray();
-                    for( const auto& rIn : rgbColor )
-                    {
-                        *pColors++ = rIn.Red;
-                        *pColors++ = rIn.Green;
-                        *pColors++ = rIn.Blue;
-                        *pColors++ = 1.0;
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< double > SAL_CALL convertFromARGB( const cpo::uno::Sequence< rendering::ARGBColor >& rgbColor ) override
-                {
-                    const std::size_t              nLen( rgbColor.getLength() );
-
-                    cpo::uno::Sequence< double > aRes(nLen*4);
-                    double* pColors=aRes.getArray();
-                    for( const auto& rIn : rgbColor )
-                    {
-                        *pColors++ = rIn.Red;
-                        *pColors++ = rIn.Green;
-                        *pColors++ = rIn.Blue;
-                        *pColors++ = rIn.Alpha;
-                    }
-                    return aRes;
-                }
-                virtual cpo::uno::Sequence< double > SAL_CALL convertFromPARGB( const cpo::uno::Sequence< rendering::ARGBColor >& rgbColor ) override
-                {
-                    const std::size_t              nLen( rgbColor.getLength() );
-
-                    cpo::uno::Sequence< double > aRes(nLen*4);
-                    double* pColors=aRes.getArray();
-                    for( const auto& rIn : rgbColor )
-                    {
-                        *pColors++ = rIn.Red/rIn.Alpha;
-                        *pColors++ = rIn.Green/rIn.Alpha;
-                        *pColors++ = rIn.Blue/rIn.Alpha;
-                        *pColors++ = rIn.Alpha;
-                    }
-                    return aRes;
-                }
-
-            public:
-                StandardColorSpace() : m_aComponentTags(4)
-                {
-                    sal_Int8* pTags = m_aComponentTags.getArray();
-                    pTags[0] = rendering::ColorComponentTag::RGB_RED;
-                    pTags[1] = rendering::ColorComponentTag::RGB_GREEN;
-                    pTags[2] = rendering::ColorComponentTag::RGB_BLUE;
-                    pTags[3] = rendering::ColorComponentTag::ALPHA;
-                }
-            };
-        }
-
-        uno::Reference<rendering::XColorSpace> createStandardColorSpace()
-        {
-            return new StandardColorSpace();
-        }
-
         cpo::uno::Sequence< double > colorToStdColorSpaceSequence( const Color& rColor )
         {
             return
@@ -562,34 +214,14 @@ namespace vcl::unotools
             return aColor;
         }
 
-        cpo::uno::Sequence< double > colorToDoubleSequence(
-            const Color&                                    rColor,
-            const uno::Reference< rendering::XColorSpace >& xColorSpace )
+        cpo::uno::Sequence< double > colorToDoubleSequence( const Color& rColor )
         {
-            cpo::uno::Sequence<rendering::ARGBColor> aSeq
-            {
-                {
-                    toDoubleColor(rColor.GetAlpha()),
-                    toDoubleColor(rColor.GetRed()),
-                    toDoubleColor(rColor.GetGreen()),
-                    toDoubleColor(rColor.GetBlue())
-                }
-            };
-
-            return xColorSpace->convertFromARGB(aSeq);
+            return colorToStdColorSpaceSequence(rColor);
         }
 
-        Color doubleSequenceToColor(
-            const cpo::uno::Sequence< double >&                  rColor,
-            const uno::Reference< rendering::XColorSpace >& xColorSpace )
+        Color doubleSequenceToColor( const cpo::uno::Sequence< double >& rColor )
         {
-            const rendering::ARGBColor aARGBColor(
-                xColorSpace->convertToARGB(rColor)[0]);
-
-            return Color( ColorAlpha, toByteColor(aARGBColor.Alpha),
-                          toByteColor(aARGBColor.Red),
-                          toByteColor(aARGBColor.Green),
-                          toByteColor(aARGBColor.Blue) );
+            return stdColorSpaceSequenceToColor(rColor);
         }
 
 } // namespace canvas

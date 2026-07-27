@@ -314,7 +314,7 @@ class InitializerBase {
 			document.getElementById('content-keeper').remove();
 		}, false);
 
-		let productName = document.getElementById("init-product-branding-name").value;
+		let productName = document.getElementById("init-product-branding-name") ? document.getElementById("init-product-branding-name").value : "";
 		if (typeof productName === 'string' && productName.length) {
 			window.brandProductName = productName;
 		}
@@ -322,7 +322,7 @@ class InitializerBase {
 		if (typeof productURL === 'string' && productURL.length) {
 			window.brandProductURL = productURL;
 		}
-		let logoURL = document.getElementById("init-logo-url").value;
+		let logoURL = document.getElementById("init-logo-url") ? document.getElementById("init-logo-url").value : "";
 		if (typeof logoURL === 'string' && logoURL.length) {
 			window.logoURL= logoURL;
 		}
@@ -512,8 +512,10 @@ class MobileAppInitializer extends InitializerBase {
 
 		const element = document.getElementById("initial-variables");
 
-		window.MobileAppName = element.dataset.mobileAppName;
-		window.brandProductName = element.dataset.mobileAppName;
+		// A script loaded before this one can define the product name; the
+		// name baked in at build time is the fallback.
+		window.MobileAppName = window.brandProductName || element.dataset.mobileAppName;
+		window.brandProductName = window.MobileAppName;
 		window.vendor = element.dataset.vendor;
 		window.copyrightYear = element.dataset.copyrightYear;
 
@@ -1134,6 +1136,41 @@ function showWelcomeSVG() {
 			}
 
 			return parsedValue;
+		},
+
+		// Whether the OS is currently set to a dark colour scheme.
+		prefersDarkOS: function() {
+			return !!(global.matchMedia && global.matchMedia('(prefers-color-scheme: dark)').matches);
+		},
+
+		// Whether the user or integrator has chosen a theme explicitly, as
+		// opposed to leaving it at the "follow the OS" default. Checks the same
+		// stored sources get() honours, but not the runtime cache (which we seed
+		// with the OS value below).
+		hasExplicitDarkModePref: function() {
+			return global.prefs._getUIDefault('darkTheme') !== undefined ||
+				global.prefs._userBrowserSetting['darkTheme'] !== undefined ||
+				(global.prefs.canPersist &&
+					global.localStorage.getItem(global.prefs._lsKey('darkTheme')) !== null);
+		},
+
+		// In the browser, dark mode follows the OS light/dark setting until the
+		// user (or integrator) chooses a theme explicitly. When no explicit value
+		// is stored yet, seed the runtime cache from the OS so every
+		// getBoolean('darkTheme') reader agrees - including the initial 'load'
+		// message that tells core how to render the document. The value is cached
+		// only, never persisted, so the pref stays "unset" and keeps tracking
+		// later OS changes. The native desktop app (CODA) owns dark mode itself;
+		// the mobile and WASM builds opt out here for now. Returns the resolved
+		// boolean.
+		seedDarkModeDefault: function() {
+			const nativeApp = global.mode.isCODesktop() || global.ThisIsAMobileApp;
+			if (!nativeApp &&
+				global.prefs._localStorageCache['darkTheme'] === undefined &&
+				!global.prefs.hasExplicitDarkModePref()) {
+				global.prefs._localStorageCache['darkTheme'] = global.prefs.prefersDarkOS() ? 'true' : 'false';
+			}
+			return global.prefs.getBoolean('darkTheme');
 		},
 	};
 
@@ -2249,7 +2286,7 @@ function showWelcomeSVG() {
 					msg += ' spellOnline=' + spellOnline;
 				}
 
-				const darkTheme = window.prefs.getBoolean('darkTheme');
+				const darkTheme = window.prefs.seedDarkModeDefault();
 				msg += ' darkTheme=' + darkTheme;
 
 				const darkBackground = window.prefs.getBoolean('darkBackgroundForTheme.' + (darkTheme ? 'dark' : 'light'), darkTheme);

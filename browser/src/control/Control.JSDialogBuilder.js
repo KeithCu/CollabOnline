@@ -661,8 +661,10 @@ window.L.Control.JSDialogBuilder = window.L.Control.extend({
 				var label = window.L.DomUtil.create('span', 'ui-expander-label ' + builder.options.cssClass, expanderBtn);
 				label.innerText = builder._cleanText(data.children[0].text);
 				label.id = prefix + '-label';
-				if (data.children[0].visible === false)
+				if (data.children[0].visible === false) {
 					window.L.DomUtil.addClass(label, 'hidden');
+					window.L.DomUtil.addClass(expanderBtn, 'hidden');
+				}
 				builder.postProcess(expanderBtn, data.children[0]);
 
 				var state = data.children.length > 1 && expanded;
@@ -1183,7 +1185,7 @@ window.L.Control.JSDialogBuilder = window.L.Control.extend({
 		if (data.text)
 			buttonLink.textContent = builder._cleanText(data.text);
 		else if (data.html)
-			buttonLink.innerHTML = data.html;
+			buttonLink.innerHTML = app.LOUtil.sanitize(data.html);
 
 		var accKey = builder._getAccessKeyFromText(data.text);
 		builder._stressAccessKey(buttonLink, accKey);
@@ -1315,7 +1317,7 @@ window.L.Control.JSDialogBuilder = window.L.Control.extend({
 	},
 
 	_isStringCloseToURL : function(str) {
-		return str.indexOf('http') !== -1;
+		return str.indexOf('http') !== -1 || str.indexOf('data:') === 0;
 	},
 
 	// TODO: move to jsdialog/Widget.Toolitem.ts

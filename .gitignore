@@ -109,6 +109,7 @@ browser/typescript_js
 *.tsbuildinfo
 browser/src/app/TaskWorker.js
 
+/coconvert
 /coolforkit
 /coolforkitns
 /coolforkit-caps
@@ -126,6 +127,7 @@ coolstress
 coolconfig
 loolconfig
 loadtest
+coconvert
 clientnb
 libglobals.a
 libkitglobals.a
@@ -274,6 +276,9 @@ browser/util/__pycache__
 /clang/plugin.so
 
 .envrc
+
+# scripts/coverity.sh
+/cov-int/
 
 # This needs to stay at the end, to honor engine/.gitignore:
 !engine/**

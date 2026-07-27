@@ -52,6 +52,69 @@ bool isKnownSlideCommand(const std::string& key)
 namespace AIUtil
 {
 
+namespace
+{
+struct PreCannedAIProvider
+{
+    std::string_view id;
+    std::string_view baseUrl;
+    std::string_view host; // must be the host part of baseUrl
+};
+
+// The built-in AI providers. Keep in sync with AI_PROVIDERS in
+// browser/admin/src/integrator/AdminIntegratorSettings.ts.
+constexpr PreCannedAIProvider PreCannedAIProviders[] = {
+    { "openai", "https://api.openai.com", "api.openai.com" },
+    { "groq", "https://api.groq.com/openai", "api.groq.com" },
+    { "together", "https://api.together.xyz", "api.together.xyz" },
+    { "mistral", "https://api.mistral.ai", "api.mistral.ai" },
+};
+}
+
+std::string_view preCannedAIProviderBaseUrl(std::string_view id)
+{
+    for (const auto& provider : PreCannedAIProviders)
+        if (provider.id == id)
+            return provider.baseUrl;
+    return {};
+}
+
+bool isPreCannedAIProviderHost(std::string_view host)
+{
+    for (const auto& provider : PreCannedAIProviders)
+        if (provider.host == host)
+            return true;
+    return false;
+}
+
+std::string normalizeAIBaseUrl(std::string_view baseUrl)
+{
+    std::string url(baseUrl);
+
+    const auto stripTrailingSlashes = [&url]()
+    {
+        while (!url.empty() && url.back() == '/')
+            url.pop_back();
+    };
+
+    stripTrailingSlashes();
+
+    // Drop a single trailing "/v1" (any case). The version path is appended
+    // afterwards, so leaving one here would double it into "/v1/v1/...".
+    if (url.size() >= 3)
+    {
+        const std::size_t tail = url.size() - 3;
+        if (url[tail] == '/' && (url[tail + 1] == 'v' || url[tail + 1] == 'V') &&
+            url[tail + 2] == '1')
+        {
+            url.erase(tail);
+            stripTrailingSlashes();
+        }
+    }
+
+    return url;
+}
+
 bool parseLenientArgs(const std::string& argsJson, Poco::JSON::Object::Ptr& argsObj)
 {
     if (JsonUtil::parseJSON(argsJson, argsObj))

@@ -39,6 +39,10 @@
 #include <unotools/syslocaleoptions.hxx>
 #include <unotools/useroptions.hxx>
 
+#include <com/sun/star/style/XStyleFamiliesSupplier.hpp>
+#include <com/sun/star/container/XNameAccess.hpp>
+#include <com/sun/star/beans/XPropertySet.hpp>
+
 #include <sc.hrc>
 #include <postit.hxx>
 #include <attrib.hxx>
@@ -1250,6 +1254,411 @@ CPPUNIT_TEST_FIXTURE(ScTiledRenderingTest, testDocumentSizeWithTwoViews)
     SfxViewShell::Current()->setCOKitViewCallback(nullptr);
     KitHelper::setView(nView1);
     SfxViewShell::Current()->setCOKitViewCallback(nullptr);
+}
+
+CPPUNIT_TEST_FIXTURE(ScTiledRenderingTest, testRowHeightChangeRendersFreshAfterUndo)
+{
+    // A row height change made outside the interactive resize path, like undo or
+    // redo of typing that auto-grew the row, shifts every row below it. A view
+    // that already resolved row positions for that area must render tiles with
+    // the rows at their new places, the same as a freshly created view does.
+    ScModelObj* pModelObj = createDoc("empty.ods");
+    ScViewData* pViewData = ScDocShell::GetViewData();
+    CPPUNIT_ASSERT(pViewData);
+    ScDocShell* pDocSh = pViewData->GetDocShell();
+    CPPUNIT_ASSERT(pDocSh);
+    ScDocument& rDoc = pViewData->GetDocument();
+
+    // A distant row lets a stale cached row position show up as a big offset.
+    // The neighbouring rows carry text so a shifted render differs in pixels.
+    const SCCOL nCol = 8;
+    const SCROW nRow = 9864;
+    for (SCROW nR = nRow - 3; nR <= nRow + 3; ++nR)
+        if (nR != nRow)
+            rDoc.SetString(ScAddress(nCol, nR, 0), "row " + OUString::number(nR + 1));
+
+    const tools::Long nRowOffsetTw = rDoc.GetRowHeight(0, nRow - 1, 0);
+    const tools::Rectangle aVisArea(0, nRowOffsetTw - 2000, 20000, nRowOffsetTw + 8000);
+    pModelObj->setClientVisibleArea(aVisArea);
+
+    // The header request is how a client viewport makes the view record row
+    // position anchors for this area.
+    {
+        tools::JsonWriter aJsonWriter;
+        pModelObj->getRowColumnHeaders(aVisArea, aJsonWriter);
+        aJsonWriter.finishAndGetAsOString();
+    }
+    Scheduler::ProcessEventsToIdle();
+
+    // Grow the row the way undo and redo of a data entry do: write the cell and
+    // recompute the optimal height through the document shell.
+    ScFieldEditEngine& rEngine = rDoc.GetEditEngine();
+    rEngine.SetTextCurrentDefaults(u"one\ntwo\nthree\nfour\nfive"_ustr);
+    rDoc.SetEditText(ScAddress(nCol, nRow, 0), rEngine.CreateTextObject());
+    const sal_uInt16 nOldHeight = rDoc.GetRowHeight(nRow, 0);
+    CPPUNIT_ASSERT(pDocSh->AdjustRowHeight(nRow, nRow, 0));
+    CPPUNIT_ASSERT(rDoc.GetRowHeight(nRow, 0) > nOldHeight);
+    Scheduler::ProcessEventsToIdle();
+
+    // Render the rows below the grown one from the view that held old anchors.
+    const int nCanvasWidth = 512;
+    const int nCanvasHeight = 512;
+    const tools::Long nTilePosX = 9000;
+    const tools::Long nTilePosY = nRowOffsetTw + 1000;
+    std::vector<unsigned char> aBuffer1(nCanvasWidth * nCanvasHeight * 4);
+    ScopedVclPtrInstance<VirtualDevice> pDevice1(DeviceFormat::WITHOUT_ALPHA);
+    pDevice1->SetOutputSizePixelScaleOffsetAndKitBuffer(Size(nCanvasWidth, nCanvasHeight), 1.0,
+                                                        Point(), aBuffer1.data());
+    pModelObj->paintTile(*pDevice1, nCanvasWidth, nCanvasHeight, nTilePosX, nTilePosY,
+                         /*nTileWidth=*/7680, /*nTileHeight=*/7680);
+    Scheduler::ProcessEventsToIdle();
+
+    // A freshly created view resolves the row positions from the document.
+    int nView1 = KitHelper::getCurrentView();
+    KitHelper::createView();
+    pModelObj->setClientVisibleArea(aVisArea);
+    {
+        tools::JsonWriter aJsonWriter;
+        pModelObj->getRowColumnHeaders(aVisArea, aJsonWriter);
+        aJsonWriter.finishAndGetAsOString();
+    }
+    Scheduler::ProcessEventsToIdle();
+
+    std::vector<unsigned char> aBuffer2(nCanvasWidth * nCanvasHeight * 4);
+    ScopedVclPtrInstance<VirtualDevice> pDevice2(DeviceFormat::WITHOUT_ALPHA);
+    pDevice2->SetOutputSizePixelScaleOffsetAndKitBuffer(Size(nCanvasWidth, nCanvasHeight), 1.0,
+                                                        Point(), aBuffer2.data());
+    pModelObj->paintTile(*pDevice2, nCanvasWidth, nCanvasHeight, nTilePosX, nTilePosY,
+                         /*nTileWidth=*/7680, /*nTileHeight=*/7680);
+    Scheduler::ProcessEventsToIdle();
+
+    bool bAreBuffersMatching = aBuffer1 == aBuffer2;
+    CPPUNIT_ASSERT_EQUAL_MESSAGE("Buffers should match", true, bAreBuffersMatching);
+
+    SfxViewShell::Current()->setCOKitViewCallback(nullptr);
+    KitHelper::setView(nView1);
+    SfxViewShell::Current()->setCOKitViewCallback(nullptr);
+}
+
+CPPUNIT_TEST_FIXTURE(ScTiledRenderingTest, testRowsBelowKeepPositionAfterRowHeightChange)
+{
+    // A row height change made through the document shell, the path undo and
+    // redo of a data entry take, shifts every row below it. A view that already
+    // resolved row positions for that area must place those rows at their new
+    // positions: both in the coordinates it reports and in the tiles it paints.
+    // When it does not, tiles below the grown row show the neighbouring rows
+    // shifted by the height delta, with text cut in half at the tile boundary.
+    // The clients also have to be told that the row geometry they cache changed.
+    comphelper::COKit::setCompatFlag(comphelper::COKit::Compat::scPrintTwipsMsgs);
+    ScModelObj* pModelObj = createDoc("empty.ods");
+    ScViewData* pViewData = ScDocShell::GetViewData();
+    CPPUNIT_ASSERT(pViewData);
+    ScDocShell* pDocSh = pViewData->GetDocShell();
+    CPPUNIT_ASSERT(pDocSh);
+    ScDocument& rDoc = pViewData->GetDocument();
+    ScTestViewCallback aView;
+
+    // A distant row makes a stale cached position visible as a large offset;
+    // the rows around the grown one carry text so a shifted render differs in
+    // pixels and shows the artifact.
+    const SCCOL nCol = 8;
+    const SCROW nRow = 9864;
+    for (SCROW nR = nRow - 3; nR <= nRow + 3; ++nR)
+        if (nR != nRow)
+            rDoc.SetString(ScAddress(nCol, nR, 0), "row " + OUString::number(nR + 1));
+
+    const tools::Long nRowOffsetTw = rDoc.GetRowHeight(0, nRow - 1, 0);
+    const tools::Rectangle aVisArea(0, nRowOffsetTw - 2000, 20000, nRowOffsetTw + 8000);
+    pModelObj->setClientVisibleArea(aVisArea);
+
+    // The header request is how a client viewport makes the view record row
+    // position anchors for this area.
+    {
+        tools::JsonWriter aJsonWriter;
+        pModelObj->getRowColumnHeaders(aVisArea, aJsonWriter);
+        aJsonWriter.finishAndGetAsOString();
+    }
+    Scheduler::ProcessEventsToIdle();
+
+    // Grow the row the way ScUndoEnterData::DoChange does: write the multiline
+    // cell, then recompute the optimal height through the document shell.
+    ScFieldEditEngine& rEngine = rDoc.GetEditEngine();
+    rEngine.SetTextCurrentDefaults(u"one\ntwo\nthree\nfour\nfive"_ustr);
+    rDoc.SetEditText(ScAddress(nCol, nRow, 0), rEngine.CreateTextObject());
+    const sal_uInt16 nOldHeight = rDoc.GetRowHeight(nRow, 0);
+    aView.m_sInvalidateSheetGeometry = ""_ostr;
+    CPPUNIT_ASSERT(pDocSh->AdjustRowHeight(nRow, nRow, 0));
+    CPPUNIT_ASSERT(rDoc.GetRowHeight(nRow, 0) > nOldHeight);
+    Scheduler::ProcessEventsToIdle();
+
+    // The client re-reads the row geometry only when it is told that it changed.
+    CPPUNIT_ASSERT_EQUAL("rows sizes"_ostr, aView.m_sInvalidateSheetGeometry);
+
+    // The view's position for a row below the grown one has to match the
+    // position accumulated from the document row heights.
+    const double fPPTY = pViewData->GetPPTY();
+    tools::Long nExpectedPixels = 0;
+    for (SCROW nR = 0; nR < nRow + 2; ++nR)
+        if (sal_uInt16 nSize = rDoc.GetRowHeight(nR, 0))
+            nExpectedPixels += ScViewData::ToPixel(nSize, fPPTY);
+    const Point aScrPos = pViewData->GetScrPos(nCol, nRow + 2, pViewData->GetActivePart());
+    CPPUNIT_ASSERT_EQUAL(nExpectedPixels, aScrPos.Y());
+
+    // Two stacked tiles have to show the same pixels as one tile covering both:
+    // a stale position shifts the lower tile's content but not the lower half
+    // of the taller render, which is the text-cut-in-half seam.
+    const tools::Long nTileTw = 3840;
+    const tools::Long nTilePosY = (nRowOffsetTw / nTileTw) * nTileTw;
+    tools::Long nColOffsetTw = 0;
+    for (SCCOL nC = 0; nC < nCol; ++nC)
+        nColOffsetTw += rDoc.GetColWidth(nC, 0);
+    const tools::Long nTilePosX = (nColOffsetTw / nTileTw) * nTileTw;
+    const int nCanvasSize = 256;
+
+    auto paintArea = [&](tools::Long nPosY, int nHeightPx,
+                         tools::Long nHeightTw) -> std::vector<unsigned char>
+    {
+        std::vector<unsigned char> aBuffer(nCanvasSize * nHeightPx * 4);
+        ScopedVclPtrInstance<VirtualDevice> pDevice(DeviceFormat::WITHOUT_ALPHA);
+        pDevice->SetOutputSizePixelScaleOffsetAndKitBuffer(Size(nCanvasSize, nHeightPx), 1.0,
+                                                           Point(), aBuffer.data());
+        pModelObj->paintTile(*pDevice, nCanvasSize, nHeightPx, nTilePosX, nPosY,
+                             /*nTileWidth=*/nTileTw, /*nTileHeight=*/nHeightTw);
+        Scheduler::ProcessEventsToIdle();
+        return aBuffer;
+    };
+
+    const std::vector<unsigned char> aUpperTile = paintArea(nTilePosY, nCanvasSize, nTileTw);
+    const std::vector<unsigned char> aLowerTile
+        = paintArea(nTilePosY + nTileTw, nCanvasSize, nTileTw);
+    const std::vector<unsigned char> aBothTiles
+        = paintArea(nTilePosY, 2 * nCanvasSize, 2 * nTileTw);
+    const std::vector<unsigned char> aUpperRepaint = paintArea(nTilePosY, nCanvasSize, nTileTw);
+
+    auto firstDiffPixelRow = [](const std::vector<unsigned char>& rTile,
+                                 const unsigned char* pReference) -> int
+    {
+        for (size_t i = 0; i < rTile.size(); ++i)
+            if (rTile[i] != pReference[i])
+                return static_cast<int>(i / (nCanvasSize * 4));
+        return -1;
+    };
+    const OString aDiffInfo = "first differing pixel row: upper vs big "
+        + OString::number(firstDiffPixelRow(aUpperTile, aBothTiles.data()))
+        + ", lower vs big "
+        + OString::number(firstDiffPixelRow(aLowerTile, aBothTiles.data() + aUpperTile.size()))
+        + ", upper repaint vs upper "
+        + OString::number(firstDiffPixelRow(aUpperTile, aUpperRepaint.data()));
+
+    // The bottommost pixel row of the upper tile carries the tile's own edge of
+    // the boundary grid line; in the taller render the same y is interior, so
+    // the comparison covers the rows above it.
+    const size_t nUpperComparable = (nCanvasSize - 1) * nCanvasSize * 4;
+    CPPUNIT_ASSERT_MESSAGE(aDiffInfo.getStr(),
+        std::equal(aUpperTile.begin(), aUpperTile.begin() + nUpperComparable,
+                   aBothTiles.begin()));
+    CPPUNIT_ASSERT_MESSAGE(aDiffInfo.getStr(),
+        std::equal(aLowerTile.begin(), aLowerTile.end(),
+                   aBothTiles.begin() + aUpperTile.size()));
+}
+
+namespace
+{
+
+// Records row and column position anchors for the given area in the current view, the way a
+// client viewport does when it shows that part of the sheet.
+void requestRowColumnHeaders(ScModelObj* pModelObj, const tools::Rectangle& rArea)
+{
+    pModelObj->setClientVisibleArea(rArea);
+    tools::JsonWriter aJsonWriter;
+    pModelObj->getRowColumnHeaders(rArea, aJsonWriter);
+    aJsonWriter.finishAndGetAsOString();
+    Scheduler::ProcessEventsToIdle();
+}
+
+// The pixel position of the top of nRow accumulated from the document row heights, the same
+// way a freshly created view resolves it. Hidden rows contribute nothing.
+tools::Long expectedRowPosition(const ScDocument& rDoc, double fPPTY, SCROW nRow)
+{
+    tools::Long nPixels = 0;
+    for (SCROW nR = 0; nR < nRow; ++nR)
+        if (sal_uInt16 nSize = rDoc.GetRowHeight(nR, 0))
+            nPixels += ScViewData::ToPixel(nSize, fPPTY);
+    return nPixels;
+}
+
+}
+
+CPPUNIT_TEST_FIXTURE(ScTiledRenderingTest, testRowsKeepPositionAfterSortUndo)
+{
+    // Undo of a sort that was executed on a range with hidden rows moves the hidden flags
+    // back to their previous rows. A view that already resolved row positions for that area
+    // must place the rows at their restored positions, the same as a freshly created view,
+    // and the clients have to be told that the row geometry they cache changed.
+    comphelper::COKit::setCompatFlag(comphelper::COKit::Compat::scPrintTwipsMsgs);
+    ScModelObj* pModelObj = createDoc("empty.ods");
+    ScViewData* pViewData = ScDocShell::GetViewData();
+    CPPUNIT_ASSERT(pViewData);
+    ScDocument& rDoc = pViewData->GetDocument();
+    ScTestViewCallback aView;
+
+    // Descending values in a distant range make the ascending sort reverse the row order; a
+    // stale cached row position then shows up as a large offset.
+    const SCROW nRow = 9840;
+    const int nRangeSize = 10;
+    for (int i = 0; i < nRangeSize; ++i)
+        rDoc.SetValue(ScAddress(0, nRow + i, 0), nRangeSize - i);
+
+    // Two tall hidden rows: hiding them removes more height than hiding the default rows the
+    // sort is going to hide in their place, so the total height above the rows below changes
+    // with every move of the hidden flags.
+    rDoc.SetRowHeightRange(nRow + 2, nRow + 3, 0, 800);
+    rDoc.SetManualHeight(nRow + 2, nRow + 3, 0, true);
+    rDoc.SetRowHidden(nRow + 2, nRow + 3, 0, true);
+
+    dispatchCommand(mxComponent, u".uno:GoToCell"_ustr,
+                    comphelper::InitPropertySequence(
+                        { { "ToPoint", cpo::uno::Any(u"A9841:A9850"_ustr) } }));
+    dispatchCommand(mxComponent, u".uno:SortAscending"_ustr, {});
+    Scheduler::ProcessEventsToIdle();
+
+    // The rows that carried the values 8 and 7 moved to the positions of the values in the
+    // ascending order, and took their hidden flags with them; the tall rows became visible.
+    CPPUNIT_ASSERT_EQUAL(1.0, rDoc.GetValue(ScAddress(0, nRow, 0)));
+    CPPUNIT_ASSERT(rDoc.RowHidden(nRow + 6, 0));
+    CPPUNIT_ASSERT(rDoc.RowHidden(nRow + 7, 0));
+    CPPUNIT_ASSERT(!rDoc.RowHidden(nRow + 2, 0));
+
+    const tools::Long nRowOffsetTw = rDoc.GetRowHeight(0, nRow - 1, 0);
+    const tools::Rectangle aVisArea(0, nRowOffsetTw - 2000, 20000, nRowOffsetTw + 8000);
+    requestRowColumnHeaders(pModelObj, aVisArea);
+
+    const double fPPTY = pViewData->GetPPTY();
+    CPPUNIT_ASSERT_EQUAL(expectedRowPosition(rDoc, fPPTY, nRow + 8),
+                         pViewData->GetScrPos(0, nRow + 8, pViewData->GetActivePart()).Y());
+
+    aView.m_sInvalidateSheetGeometry = ""_ostr;
+    dispatchCommand(mxComponent, u".uno:Undo"_ustr, {});
+    Scheduler::ProcessEventsToIdle();
+
+    // The undo moved the hidden flags back to the tall rows.
+    CPPUNIT_ASSERT(rDoc.RowHidden(nRow + 2, 0));
+    CPPUNIT_ASSERT(rDoc.RowHidden(nRow + 3, 0));
+    CPPUNIT_ASSERT(!rDoc.RowHidden(nRow + 6, 0));
+
+    CPPUNIT_ASSERT_EQUAL(expectedRowPosition(rDoc, fPPTY, nRow + 8),
+                         pViewData->GetScrPos(0, nRow + 8, pViewData->GetActivePart()).Y());
+
+    // The client re-reads the row geometry only when it is told that it changed.
+    CPPUNIT_ASSERT_EQUAL("rows"_ostr, aView.m_sInvalidateSheetGeometry);
+}
+
+CPPUNIT_TEST_FIXTURE(ScTiledRenderingTest, testTilesBelowSortedRangeInvalidatedOnSort)
+{
+    // Sorting a range with hidden rows moves the hidden flags along with the rows, so every
+    // row below the sorted range can sit at a new position. The clients keep the old pixels
+    // of that area until they receive an invalidation for it.
+    comphelper::COKit::setCompatFlag(comphelper::COKit::Compat::scPrintTwipsMsgs);
+    ScModelObj* pModelObj = createDoc("empty.ods");
+    ScViewData* pViewData = ScDocShell::GetViewData();
+    CPPUNIT_ASSERT(pViewData);
+    ScDocument& rDoc = pViewData->GetDocument();
+    ScTestViewCallback aView;
+
+    const SCROW nRow = 9840;
+    const int nRangeSize = 10;
+    for (int i = 0; i < nRangeSize; ++i)
+        rDoc.SetValue(ScAddress(0, nRow + i, 0), nRangeSize - i);
+
+    // Content below the sorted range extends the document there, so invalidations for that
+    // area are not clipped away.
+    for (SCROW nR = nRow + 12; nR <= nRow + 20; ++nR)
+        rDoc.SetString(ScAddress(1, nR, 0), "row " + OUString::number(nR + 1));
+
+    // Two tall hidden rows: every move of the hidden flags changes the total height of the
+    // sorted range and with it the position of everything below.
+    rDoc.SetRowHeightRange(nRow + 2, nRow + 3, 0, 800);
+    rDoc.SetManualHeight(nRow + 2, nRow + 3, 0, true);
+    rDoc.SetRowHidden(nRow + 2, nRow + 3, 0, true);
+
+    dispatchCommand(mxComponent, u".uno:GoToCell"_ustr,
+                    comphelper::InitPropertySequence(
+                        { { "ToPoint", cpo::uno::Any(u"A9841:A9850"_ustr) } }));
+
+    // The client viewport covers the sorted range and the rows below it; invalidations are
+    // clipped to the area the client can show.
+    const tools::Long nRowOffsetTw = rDoc.GetRowHeight(0, nRow - 1, 0);
+    pModelObj->setClientVisibleArea(
+        tools::Rectangle(0, nRowOffsetTw - 1000, 20000, nRowOffsetTw + 12000));
+    Scheduler::ProcessEventsToIdle();
+
+    auto anyInvalidationCoversY = [&aView](tools::Long nY) {
+        for (const auto& rRect : aView.m_aInvalidations)
+            if (rRect.Top() <= nY && rRect.Bottom() >= nY)
+                return true;
+        return false;
+    };
+
+    aView.ClearAllInvalids();
+    dispatchCommand(mxComponent, u".uno:SortAscending"_ustr, {});
+    Scheduler::ProcessEventsToIdle();
+    CPPUNIT_ASSERT(rDoc.RowHidden(nRow + 6, 0));
+
+    // A row a few rows below the sorted range sits at a new position now, so its old pixels
+    // are stale and the view has to receive an invalidation covering it.
+    CPPUNIT_ASSERT(anyInvalidationCoversY(rDoc.GetRowHeight(0, nRow + 14, 0)));
+
+    aView.ClearAllInvalids();
+    dispatchCommand(mxComponent, u".uno:SortDescending"_ustr, {});
+    Scheduler::ProcessEventsToIdle();
+    CPPUNIT_ASSERT(rDoc.RowHidden(nRow + 2, 0));
+
+    CPPUNIT_ASSERT(anyInvalidationCoversY(rDoc.GetRowHeight(0, nRow + 14, 0)));
+}
+
+CPPUNIT_TEST_FIXTURE(ScTiledRenderingTest, testRowsKeepPositionAfterCellStyleChange)
+{
+    // Changing a cell style through the style API, the way a macro or extension does,
+    // recomputes the optimal height of every row that uses the style. A view that already
+    // resolved row positions for that area must place the rows below at their new positions,
+    // and the client has to be told that the row geometry it caches changed.
+    comphelper::COKit::setCompatFlag(comphelper::COKit::Compat::scPrintTwipsMsgs);
+    ScModelObj* pModelObj = createDoc("empty.ods");
+    ScViewData* pViewData = ScDocShell::GetViewData();
+    CPPUNIT_ASSERT(pViewData);
+    ScDocument& rDoc = pViewData->GetDocument();
+    ScTestViewCallback aView;
+
+    const SCROW nRow = 9840;
+    for (SCROW nR = nRow; nR <= nRow + 3; ++nR)
+        rDoc.SetString(ScAddress(0, nR, 0), "row " + OUString::number(nR + 1));
+
+    const tools::Long nRowOffsetTw = rDoc.GetRowHeight(0, nRow - 1, 0);
+    const tools::Rectangle aVisArea(0, nRowOffsetTw - 2000, 20000, nRowOffsetTw + 8000);
+    requestRowColumnHeaders(pModelObj, aVisArea);
+
+    const double fPPTY = pViewData->GetPPTY();
+    CPPUNIT_ASSERT_EQUAL(expectedRowPosition(rDoc, fPPTY, nRow + 8),
+                         pViewData->GetScrPos(0, nRow + 8, pViewData->GetActivePart()).Y());
+
+    // A bigger font in the default cell style makes every row with content taller.
+    const sal_uInt16 nOldHeight = rDoc.GetRowHeight(nRow, 0);
+    uno::Reference<style::XStyleFamiliesSupplier> xSupplier(mxComponent, uno::UNO_QUERY_THROW);
+    uno::Reference<container::XNameAccess> xFamilies = xSupplier->getStyleFamilies();
+    uno::Reference<container::XNameAccess> xCellStyles(xFamilies->getByName(u"CellStyles"_ustr),
+                                                      uno::UNO_QUERY_THROW);
+    uno::Reference<beans::XPropertySet> xStyle(xCellStyles->getByName(u"Default"_ustr),
+                                               uno::UNO_QUERY_THROW);
+    aView.m_sInvalidateSheetGeometry = ""_ostr;
+    xStyle->setPropertyValue(u"CharHeight"_ustr, cpo::uno::Any(float(24)));
+    Scheduler::ProcessEventsToIdle();
+    CPPUNIT_ASSERT(rDoc.GetRowHeight(nRow, 0) > nOldHeight);
+
+    CPPUNIT_ASSERT_EQUAL(expectedRowPosition(rDoc, fPPTY, nRow + 8),
+                         pViewData->GetScrPos(0, nRow + 8, pViewData->GetActivePart()).Y());
+
+    // The client re-reads the row geometry only when it is told that it changed.
+    CPPUNIT_ASSERT_EQUAL("rows sizes"_ostr, aView.m_sInvalidateSheetGeometry);
 }
 
 CPPUNIT_TEST_FIXTURE(ScTiledRenderingTest, testDisableUndoRepair)
@@ -3179,6 +3588,27 @@ CPPUNIT_TEST_FIXTURE(ScTiledRenderingTest, testForeignEditOutputAreaDifferentZoo
         CPPUNIT_ASSERT_MESSAGE(c.sLabel, std::abs(aResult.Right()  - c.aEditPx.Right())  <= 2);
         CPPUNIT_ASSERT_MESSAGE(c.sLabel, std::abs(aResult.Bottom() - c.aEditPx.Bottom()) <= 2);
     }
+}
+
+CPPUNIT_TEST_FIXTURE(ScTiledRenderingTest, testExtendEditInvalidateRectForText)
+{
+    // A foreign view sees another view's in-progress edit only through tiles, so
+    // its invalidation must cover the whole text. The cell rectangle is widened
+    // to the text width; text that fits the cell leaves it unchanged so a short
+    // edit is not over-invalidated. Before the fix the invalidation stayed at the
+    // cell and grown text was left stale in never-repainted tiles.
+    const tools::Rectangle aCell(100, 200, 1316, 405); // 1217 x 206
+
+    // Text wider than the cell: the rectangle grows rightwards to the text width,
+    // keeping the cell's top, bottom and left.
+    const tools::Rectangle aGrown = ScGridWindow::ExtendEditInvalidateRectForText(aCell, 4000);
+    CPPUNIT_ASSERT_EQUAL(aCell.Left(), aGrown.Left());
+    CPPUNIT_ASSERT_EQUAL(aCell.Top(), aGrown.Top());
+    CPPUNIT_ASSERT_EQUAL(aCell.Bottom(), aGrown.Bottom());
+    CPPUNIT_ASSERT(aGrown.GetWidth() >= 4000);
+
+    // Text that fits inside the cell: the rectangle is left unchanged.
+    CPPUNIT_ASSERT_EQUAL(aCell, ScGridWindow::ExtendEditInvalidateRectForText(aCell, 50));
 }
 
 CPPUNIT_TEST_FIXTURE(ScTiledRenderingTest, testOpenURL)

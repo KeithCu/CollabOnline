@@ -43,38 +43,10 @@ namespace canvas
     rtl::Reference<ParametricPolyPolygon> ParametricPolyPolygon::create(
         const uno::Reference< rendering::XGraphicDevice >& rDevice,
         std::u16string_view rServiceName,
-        const cpo::uno::Sequence< cpo::uno::Any >& rArgs )
+        const ::cpo::uno::Sequence< ::cpo::uno::Sequence< double > >& colorSequence,
+        const ::cpo::uno::Sequence< double >& colorStops,
+        double fAspectRatio )
     {
-        double fAspectRatio=1.0;
-
-        // defaults
-        cpo::uno::Sequence< cpo::uno::Sequence< double > > colorSequence{
-            rDevice->getDeviceColorSpace()->convertFromRGB({ rendering::RGBColor(0,0,0) }),
-            rDevice->getDeviceColorSpace()->convertFromRGB({ rendering::RGBColor(1,1,1) })
-        };
-        cpo::uno::Sequence< double > colorStops{ 0, 1 };
-
-        // extract args
-        for( const cpo::uno::Any& rArg : rArgs )
-        {
-            beans::PropertyValue aProp;
-            if( rArg >>= aProp )
-            {
-                if ( aProp.Name == "Colors" )
-                {
-                    aProp.Value >>= colorSequence;
-                }
-                else if ( aProp.Name == "Stops" )
-                {
-                    aProp.Value >>= colorStops;
-                }
-                else if ( aProp.Name == "AspectRatio" )
-                {
-                    aProp.Value >>= fAspectRatio;
-                }
-            }
-        }
-
         if ( rServiceName == u"LinearGradient" )
         {
             return createLinearHorizontalGradient(rDevice, colorSequence, colorStops);
@@ -87,22 +59,8 @@ namespace canvas
         {
             return createRectangularGradient(rDevice, colorSequence, colorStops, fAspectRatio);
         }
-        else if ( rServiceName == u"VerticalLineHatch" )
-        {
-            // TODO: NYI
-        }
-        else if ( rServiceName == u"OrthogonalLinesHatch" )
-        {
-            // TODO: NYI
-        }
-        else if ( rServiceName == u"ThreeCrossingLinesHatch" )
-        {
-            // TODO: NYI
-        }
-        else if ( rServiceName == u"FourCrossingLinesHatch" )
-        {
-            // TODO: NYI
-        }
+        else
+            assert(false && "unsupported service");
 
         return nullptr;
     }
@@ -153,43 +111,35 @@ namespace canvas
         mxDevice.clear();
     }
 
-    uno::Reference< rendering::XPolyPolygon2D > SAL_CALL ParametricPolyPolygon::getOutline( double /*t*/ )
+    uno::Reference< rendering::XPolyPolygon2D > ParametricPolyPolygon::getOutline( double /*t*/ )
     {
         // TODO(F1): outline NYI
         return uno::Reference< rendering::XPolyPolygon2D >();
     }
 
-    cpo::uno::Sequence< double > SAL_CALL ParametricPolyPolygon::getColor( double /*t*/ )
+    cpo::uno::Sequence< double > ParametricPolyPolygon::getColor( double /*t*/ )
     {
         // TODO(F1): color NYI
         return cpo::uno::Sequence< double >();
     }
 
-    cpo::uno::Sequence< double > SAL_CALL ParametricPolyPolygon::getPointColor( const geometry::RealPoint2D& /*point*/ )
+    cpo::uno::Sequence< double > ParametricPolyPolygon::getPointColor( const geometry::RealPoint2D& /*point*/ )
     {
         // TODO(F1): point color NYI
         return cpo::uno::Sequence< double >();
     }
 
-    uno::Reference< rendering::XColorSpace > SAL_CALL ParametricPolyPolygon::getColorSpace()
-    {
-        std::unique_lock aGuard( m_aMutex );
-
-        return mxDevice.is() ? mxDevice->getDeviceColorSpace() : uno::Reference< rendering::XColorSpace >();
-    }
-
-
-    OUString SAL_CALL ParametricPolyPolygon::getImplementationName(  )
+    OUString ParametricPolyPolygon::getImplementationName(  )
     {
         return u"Canvas::ParametricPolyPolygon"_ustr;
     }
 
-    bool SAL_CALL ParametricPolyPolygon::supportsService( const OUString& ServiceName )
+    bool ParametricPolyPolygon::supportsService( const OUString& ServiceName )
     {
         return cppu::supportsService(this, ServiceName);
     }
 
-    cpo::uno::Sequence< OUString > SAL_CALL ParametricPolyPolygon::getSupportedServiceNames(  )
+    cpo::uno::Sequence< OUString > ParametricPolyPolygon::getSupportedServiceNames(  )
     {
         return { u"com.sun.star.rendering.ParametricPolyPolygon"_ustr };
     }

@@ -32,7 +32,6 @@ class GtkSalMenu final : public SalMenu
 {
 private:
     std::vector< GtkSalMenuItem* >  maItems;
-    std::vector<std::pair<sal_uInt16, GtkWidget*>> maExtraButtons;
     Idle                            maUpdateMenuBarIdle;
 
     bool                            mbInActivateCallback;
@@ -121,15 +120,11 @@ public:
 
     void CreateMenuBarWidget();
     void DestroyMenuBarWidget();
-#if !GTK_CHECK_VERSION(4, 0, 0)
     gboolean SignalKey(GdkEventKey const * pEvent);
-#endif
     void ReturnFocus();
 
     virtual bool ShowNativePopupMenu(FloatingWindow * pWin, const tools::Rectangle& rRect, FloatWinPopupFlags nFlags) override;
     virtual void ShowCloseButton(bool bShow) override;
-    virtual void RemoveMenuBarButton( sal_uInt16 nId ) override;
-    virtual tools::Rectangle GetMenuBarButtonRectPixel( sal_uInt16 i_nItemId, SalFrame* i_pReferenceFrame ) override;
     virtual bool CanGetFocus() const override;
     virtual bool TakeFocus() override;
     virtual int GetMenuBarHeight() const override;

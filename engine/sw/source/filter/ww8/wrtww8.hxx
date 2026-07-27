@@ -710,6 +710,8 @@ public:
     virtual void AppendBookmarks( const SwTextNode& rNd, sal_Int32 nCurrentPos, sal_Int32 nLen, const SwRedlineData* pSwRedline = nullptr ) = 0;
 
     virtual void AppendBookmark( const OUString& rName ) = 0;
+    virtual void AppendBookmarkStart(const OUString& rName) = 0;
+    virtual void AppendBookmarkEnd(const OUString& rName, bool bIsFinal) = 0;
 
     virtual void AppendAnnotationMarks( const SwWW8AttrIter& rAttrs, sal_Int32 nCurrentPos, sal_Int32 nLen ) = 0;
 
@@ -1100,6 +1102,9 @@ public:
 
     virtual void AppendBookmarks( const SwTextNode& rNd, sal_Int32 nCurrentPos, sal_Int32 nLen, const SwRedlineData* pRedlineData = nullptr ) override;
     virtual void AppendBookmark( const OUString& rName ) override;
+    virtual void AppendBookmarkStart(const OUString& rName) override;
+    virtual void AppendBookmarkEnd(const OUString& rName, bool bIsFinal) override;
+
     void AppendBookmarkEndWithCorrection( const OUString& rName );
 
     virtual void AppendAnnotationMarks( const SwWW8AttrIter& rAttrs, sal_Int32 nCurrentPos, sal_Int32 nLen ) override;
@@ -1560,7 +1565,7 @@ private:
 
     sal_Int32 SearchNext( sal_Int32 nStartPos );
 
-    void OutSwFormatRefMark(const SwFormatRefMark& rAttr);
+    void OutSwFormatRefMark(const SwFormatRefMark& rAttr, sal_Int32 nPos);
 
     void IterToCurrent();
 
@@ -1583,7 +1588,7 @@ public:
     virtual const SfxPoolItem* HasTextItem( sal_uInt16 nWhich ) const override;
     virtual const SfxPoolItem& GetItem( sal_uInt16 nWhich ) const override;
     template<class T> const T& GetItem( TypedWhichId<T> nWhich ) const { return MSWordAttrIter::GetItem(nWhich); }
-    int OutAttrWithRange(const SwTextNode& rNode, sal_Int32 nPos);
+    int OutAttrWithRange(sal_Int32 nPos);
     const SwRedlineData* GetParagraphLevelRedline( );
     const SwRedlineData* GetRunLevelRedline( sal_Int32 nPos );
     FlyProcessingState OutFlys(sal_Int32 nSwPos);

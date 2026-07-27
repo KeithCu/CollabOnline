@@ -24,7 +24,11 @@
 #include <sal/log.hxx>
 #include <scitems.hxx>
 #include <datamapper.hxx>
+#include <documentlinkmgr.hxx>
+#include <drwlayer.hxx>
+#include <externalrefmgr.hxx>
 #include <docsh.hxx>
+#include <tabvwsh.hxx>
 #include <bcaslot.hxx>
 #include <broadcast.hxx>
 #include <SheetViewManager.hxx>
@@ -34,6 +38,7 @@
 #include <sortparam.hxx>
 #include <editeng/brushitem.hxx>
 #include <editeng/colritem.hxx>
+#include <svx/fillbitmaplink.hxx>
 
 // Add totally brand-new methods to this source file.
 
@@ -1050,6 +1055,30 @@ sc::ExternalDataMapper& ScDocument::GetExternalDataMapper()
     return *mpDataMapper;
 }
 
+bool ScDocument::HasDataProviderMappings() const
+{
+    return mpDataMapper && !mpDataMapper->getDataSources().empty();
+}
+
+bool ScDocument::HasExternalLinks() const
+{
+    if (ScExternalRefManager* pRefMgr = GetExternalRefManager(); pRefMgr && pRefMgr->hasExternalData())
+        return true;
+
+    // sheet links can exist independently from external formula references (#i100042#)
+    SCTAB nTabCount = GetTableCount();
+    for (SCTAB nTab = 0; nTab < nTabCount; ++nTab)
+        if (IsLinked(nTab))
+            return true;
+
+    if (HasLinkFormulaNeedingCheck() || HasDataProviderMappings()
+        || GetDocLinkManager().hasUpdatableLinks())
+        return true;
+
+    const ScDrawLayer* pDrawLayer = GetDrawLayer();
+    return pDrawLayer && hasDeferredFillBitmapLinks(pDrawLayer->GetItemPool());
+}
+
 void ScDocument::StoreTabToCache(SCTAB nTab, SvStream& rStrm) const
 {
     const ScTable* pTab = FetchTable(nTab);
@@ -1375,6 +1404,9 @@ void ScDocument::SyncSheetViews(SCTAB nDefaultViewTable)
         if (oQueryParam)
             Query(nSheetViewTab, *oQueryParam, false, false);
     }
+
+    if (mpShell)
+        ScTabViewShell::invalidateAllViewsKitSheetViewPositions(*mpShell, nDefaultViewTable);
 }
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

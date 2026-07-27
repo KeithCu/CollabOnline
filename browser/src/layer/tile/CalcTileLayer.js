@@ -939,12 +939,12 @@ window.L.CalcTileLayer = window.L.CanvasTileLayer.extend({
 		if (state.trim() !== '') {
 			var rowCount = parseInt(state.split(', ')[0].trim().split(' ')[0].replace(',', '').replace(',', ''));
 			var columnCount = parseInt(state.split(', ')[1].trim().split(' ')[0].replace(',', '').replace(',', ''));
-			if (rowCount > 1000000)
+			if (rowCount === app.calc.maxRowCount)
 				this._map.wholeColumnSelected = true;
 			else
 				this._map.wholeColumnSelected = false;
 
-			if (columnCount === 1024)
+			if (columnCount === app.calc.maxColumnCount)
 				this._map.wholeRowSelected = true;
 			else
 				this._map.wholeRowSelected = false;

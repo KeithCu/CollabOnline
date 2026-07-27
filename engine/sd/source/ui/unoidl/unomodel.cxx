@@ -71,6 +71,7 @@
 #include <comphelper/kit.hxx>
 #include <comphelper/propertysequence.hxx>
 #include <comphelper/propertyvalue.hxx>
+#include <comphelper/scopeguard.hxx>
 #include <comphelper/sequence.hxx>
 #include <comphelper/servicehelper.hxx>
 #include <cppuhelper/supportsservice.hxx>
@@ -86,6 +87,7 @@
 #include "unopool.hxx"
 #include <sfx2/kit/helper.hxx>
 #include <sfx2/dispatch.hxx>
+#include <sfx2/viewsh.hxx>
 #include <vcl/svapp.hxx>
 #include <Outliner.hxx>
 #include <COKit/COKitEnums.h>
@@ -113,6 +115,7 @@
 #include <svtools/unoimap.hxx>
 #include <svx/unoshape.hxx>
 #include <editeng/unonrule.hxx>
+#include <editeng/editobj.hxx>
 #include <editeng/eeitem.hxx>
 #include <unotools/datetime.hxx>
 #include <sax/tools/converter.hxx>
@@ -175,6 +178,7 @@
 #include <drawinglayer/processor2d/Primitive2dJsonProcessor.hxx>
 #include <vcl/graph.hxx>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <sfx2/kit/componenthelpers.hxx>
 #include <sfx2/kit/ControlHandler.hxx>
@@ -195,12 +199,15 @@
 #include <controller/SlsPageSelector.hxx>
 
 #include <app.hrc>
+#include <slideshow.hxx>
 
 using namespace ::cppu;
 using namespace ::com::sun::star;
 using namespace ::sd;
 using namespace ::cpo::uno;
 
+namespace
+{
 const TranslateId aTypeResIds[SdLinkTargetType::Count] =
 {
     STR_SD_PAGE,            // SdLinkTargetType::Page
@@ -209,25 +216,34 @@ const TranslateId aTypeResIds[SdLinkTargetType::Count] =
     STR_MASTERPAGE_NAME,    // SdLinkTargetType::MasterPage
 };
 
+const TranslateId aClickActionResIds[] =
+{
+    STR_CLICK_ACTION_NONE,             // ClickAction_NONE
+    STR_CLICK_ACTION_PREVPAGE,         // ClickAction_PREVPAGE
+    STR_CLICK_ACTION_NEXTPAGE,         // ClickAction_NEXTPAGE
+    STR_CLICK_ACTION_FIRSTPAGE,        // ClickAction_FIRSTPAGE
+    STR_CLICK_ACTION_LASTPAGE,         // ClickAction_LASTPAGE
+    STR_CLICK_ACTION_BOOKMARK,         // ClickAction_BOOKMARK
+    STR_CLICK_ACTION_DOCUMENT,         // ClickAction_DOCUMENT
+    STR_CLICK_ACTION_INVISIBLE,        // ClickAction_INVISIBLE
+    STR_CLICK_ACTION_SOUND,            // ClickAction_SOUND
+    STR_CLICK_ACTION_VERB,             // ClickAction_VERB
+    STR_CLICK_ACTION_VANISH,           // ClickAction_VANISH
+    STR_CLICK_ACTION_PROGRAM,          // ClickAction_PROGRAM
+    STR_CLICK_ACTION_MACRO,            // ClickAction_MACRO
+    STR_CLICK_ACTION_STOPPRESENTATION, // ClickAction_STOPPRESENTATION
+};
+
+static_assert(SAL_N_ELEMENTS(aClickActionResIds)
+              == static_cast<size_t>(presentation::ClickAction_STOPPRESENTATION) + 1,
+              "aClickActionResIds is missing an entry for a presentation::ClickAction value");
+}
+
 TranslateId SdTPAction::GetClickActionSdResId( presentation::ClickAction eCA )
 {
-    switch( eCA )
-    {
-        case presentation::ClickAction_NONE:             return STR_CLICK_ACTION_NONE;
-        case presentation::ClickAction_PREVPAGE:         return STR_CLICK_ACTION_PREVPAGE;
-        case presentation::ClickAction_NEXTPAGE:         return STR_CLICK_ACTION_NEXTPAGE;
-        case presentation::ClickAction_FIRSTPAGE:        return STR_CLICK_ACTION_FIRSTPAGE;
-        case presentation::ClickAction_LASTPAGE:         return STR_CLICK_ACTION_LASTPAGE;
-        case presentation::ClickAction_BOOKMARK:         return STR_CLICK_ACTION_BOOKMARK;
-        case presentation::ClickAction_DOCUMENT:         return STR_CLICK_ACTION_DOCUMENT;
-        case presentation::ClickAction_PROGRAM:          return STR_CLICK_ACTION_PROGRAM;
-        case presentation::ClickAction_MACRO:            return STR_CLICK_ACTION_MACRO;
-        case presentation::ClickAction_SOUND:            return STR_CLICK_ACTION_SOUND;
-        case presentation::ClickAction_VERB:             return STR_CLICK_ACTION_VERB;
-        case presentation::ClickAction_STOPPRESENTATION: return STR_CLICK_ACTION_STOPPRESENTATION;
-        default: OSL_FAIL( "No StringResource for ClickAction available!" );
-    }
-    return {};
+    auto nIndex = static_cast<size_t>(eCA);
+    assert(nIndex < SAL_N_ELEMENTS(aClickActionResIds) && "ClickAction out of range");
+    return aClickActionResIds[nIndex];
 }
 
 class SdUnoForbiddenCharsTable : public SvxUnoForbiddenCharsTable,
@@ -1650,6 +1666,26 @@ void AnimationsExporter::exportAnimate(const Reference<XAnimate>& xAnimate)
     }
 }
 
+/// Returns a snapshot of one SdrText's paragraphs. Text that is still being
+/// typed lives in the object's editing outliner rather than in the stored
+/// paragraph object, so an active edit session is snapshotted from there.
+/// An empty result means the text carries no paragraphs.
+std::optional<OutlinerParaObject> getTextParagraphSnapshot(const SdrTextObj* pTextObj,
+                                                           const SdrText* pText)
+{
+    if (!pText)
+        return std::nullopt;
+    if (pTextObj->IsInEditMode() && pText == pTextObj->getActiveText())
+    {
+        if (std::optional<OutlinerParaObject> oEdited = pTextObj->CreateEditOutlinerParaObject())
+            return oEdited;
+    }
+    const OutlinerParaObject* pStored = pText->GetOutlinerParaObject();
+    if (!pStored)
+        return std::nullopt;
+    return *pStored;
+}
+
 void GetDocStructureSlides(::tools::JsonWriter& rJsonWriter, const SdXImpressDocument* pDoc,
                            const std::map<OUString, OUString>& rArguments)
 {
@@ -1729,19 +1765,20 @@ void GetDocStructureSlides(::tools::JsonWriter& rJsonWriter, const SdXImpressDoc
                             {
                                 auto aTextNode
                                     = rJsonWriter.startNode("Text " + std::to_string(nTId));
-                                SdrText* pSdrTxt = pSdrTxtObj->getText(nTId);
-                                OutlinerParaObject* pOutlinerParaObject
-                                    = pSdrTxt->GetOutlinerParaObject();
+                                std::optional<OutlinerParaObject> oParagraphs
+                                    = getTextParagraphSnapshot(pSdrTxtObj,
+                                                               pSdrTxtObj->getText(nTId));
+                                if (!oParagraphs)
+                                    continue;
 
-                                sal_Int32 nParaCount
-                                    = pOutlinerParaObject->GetTextObject().GetParagraphCount();
+                                const EditTextObject& rTextObject = oParagraphs->GetTextObject();
+                                sal_Int32 nParaCount = rTextObject.GetParagraphCount();
 
                                 rJsonWriter.put("ParaCount", nParaCount);
                                 auto aParasNode = rJsonWriter.startArray("Paragraphs");
                                 for (int nParaId = 0; nParaId < nParaCount; nParaId++)
                                 {
-                                    OUString aParaStr(
-                                        pOutlinerParaObject->GetTextObject().GetText(nParaId));
+                                    OUString aParaStr(rTextObject.GetText(nParaId));
 
                                     rJsonWriter.putSimpleValue(aParaStr);
                                 }
@@ -1752,6 +1789,89 @@ void GetDocStructureSlides(::tools::JsonWriter& rJsonWriter, const SdXImpressDoc
             }
         }
     }
+}
+
+/// Writes the text of every slide as markdown into a "BodyText" node, one
+/// "## Slide N: <name>" section per slide. Reads the live document, so
+/// unsaved edits and text still being typed are reflected. Whole slides are
+/// appended until the size cap is reached, so a truncated result ends at a
+/// slide boundary.
+void GetDocStructureSlidesText(::tools::JsonWriter& rJsonWriter, const SdXImpressDocument* pDoc)
+{
+    auto aBodyNode = rJsonWriter.startNode("BodyText");
+    rJsonWriter.put("format", "markdown");
+
+    SdDrawDocument* pDrawDoc = pDoc->GetDoc();
+    const sal_uInt16 nPageCount = pDrawDoc ? pDrawDoc->GetSdPageCount(PageKind::Standard) : 0;
+
+    OUStringBuffer aBody;
+    bool bTruncated = false;
+    sal_uInt16 nIncludedSlides = 0;
+    for (sal_uInt16 nPage = 0; nPage < nPageCount; ++nPage)
+    {
+        SdPage* pPageStandard = pDrawDoc->GetSdPage(nPage, PageKind::Standard);
+
+        OUStringBuffer aSlideBuffer("## Slide " + OUString::number(nPage + 1) + ": "
+                                    + pPageStandard->GetName() + "\n");
+        const int nObjCount = pPageStandard->GetObjCount();
+        for (int nObj = 0; nObj < nObjCount; ++nObj)
+        {
+            SdrTextObj* pTextObj = DynCastSdrTextObj(pPageStandard->GetObj(nObj));
+            if (!pTextObj || !pTextObj->HasText())
+                continue;
+            // An empty presentation object shows only its placeholder prompt
+            // (like "Click to add Title"), not document content. One with an
+            // active edit session is kept: the flag is cleared only when the
+            // edit ends, while the typed text already lives in the editing
+            // outliner.
+            if (pTextObj->IsEmptyPresObj() && !pTextObj->IsInEditMode())
+                continue;
+
+            const sal_Int32 nTextCount = pTextObj->getTextCount();
+            for (sal_Int32 nText = 0; nText < nTextCount; ++nText)
+            {
+                std::optional<OutlinerParaObject> oParagraphs
+                    = getTextParagraphSnapshot(pTextObj, pTextObj->getText(nText));
+                if (!oParagraphs)
+                    continue;
+
+                const EditTextObject& rTextObject = oParagraphs->GetTextObject();
+                const sal_Int32 nParaCount = rTextObject.GetParagraphCount();
+                aSlideBuffer.append("\n");
+                for (sal_Int32 nPara = 0; nPara < nParaCount; ++nPara)
+                    aSlideBuffer.append(rTextObject.GetText(nPara) + "\n");
+            }
+        }
+
+        const OUString aSlideText = aSlideBuffer.makeStringAndClear();
+        if (aBody.getLength() + aSlideText.getLength() > KitHelper::AIBodyTextMaxChars)
+        {
+            bTruncated = true;
+            // A single slide can exceed the cap on its own; a hard-cut head
+            // of that slide is more useful than an empty result.
+            if (nIncludedSlides == 0)
+            {
+                aBody.append(aSlideText.subView(0, KitHelper::AIBodyTextMaxChars));
+                ++nIncludedSlides;
+            }
+            break;
+        }
+        aBody.append(aSlideText + "\n");
+        ++nIncludedSlides;
+    }
+
+    // Emit the truncation flag and an explicit instruction before the text,
+    // so the model acts on it rather than overlooking a flag buried after a
+    // large body of markdown.
+    rJsonWriter.put("truncated", bTruncated);
+    if (bTruncated)
+        rJsonWriter.put("note",
+                        "The presentation is large, so only the first "
+                            + OUString::number(nIncludedSlides) + " of "
+                            + OUString::number(nPageCount)
+                            + " slides are included here. Tell the user the summary covers only "
+                              "those slides.");
+    rJsonWriter.put("text", aBody.makeStringAndClear());
 }
 
 } // end anonymous namespace
@@ -1806,6 +1926,7 @@ const sal_uInt16 WID_MODEL_INTEROPGRABBAG     = 14;
 const sal_uInt16 WID_MODEL_THEME = 15;
 const sal_uInt16 WID_MODEL_ALLOWLINKUPDATE    = 16;
 const sal_uInt16 WID_MODEL_SLIDESECTIONS      = 17;
+const sal_uInt16 WID_MODEL_ANIMATIONSOUNDLINK = 18;
 
 static const SvxItemPropertySet* ImplGetDrawModelPropertySet()
 {
@@ -1828,6 +1949,7 @@ static const SvxItemPropertySet* ImplGetDrawModelPropertySet()
         { u"Fonts"_ustr,                  WID_MODEL_FONTS,              cppu::UnoType<cpo::uno::Sequence<cpo::uno::Any>>::get(),                     beans::PropertyAttribute::READONLY, 0},
         { sUNO_Prop_InteropGrabBag,       WID_MODEL_INTEROPGRABBAG,     cppu::UnoType<cpo::uno::Sequence< beans::PropertyValue >>::get(),       0, 0},
         { u"SlideSections"_ustr,          WID_MODEL_SLIDESECTIONS,      cppu::UnoType<cpo::uno::Sequence< beans::PropertyValue >>::get(),       0, 0},
+        { u"HasExternalAnimationSoundLink"_ustr, WID_MODEL_ANIMATIONSOUNDLINK, cppu::UnoType<bool>::get(),       0, 0},
         { sUNO_Prop_Theme,                WID_MODEL_THEME,              cppu::UnoType<util::XTheme>::get(),       0, 0},
     };
     static SvxItemPropertySet aDrawModelPropertySet_Impl( aDrawModelPropertyMap_Impl, SdrObject::GetGlobalDrawObjectItemPool() );
@@ -2010,6 +2132,29 @@ cpo::uno::Sequence< sal_Int8 > SAL_CALL SdXImpressDocument::getImplementationId(
 /***********************************************************************
 *                                                                      *
 ***********************************************************************/
+sal_uInt64 SdXImpressDocument::getVectorPartVersion(sal_Int32 nPart) const
+{
+    auto aIterator = maVectorParts.find(nPart);
+    return aIterator != maVectorParts.end() ? aIterator->second.mnVersion : 0;
+}
+
+bool SdXImpressDocument::isVectorObjectChangedSince(sal_Int32 nPart, sal_uInt64 nObjectId,
+                                                    sal_uInt64 nSince) const
+{
+    auto aPartIterator = maVectorParts.find(nPart);
+    if (aPartIterator == maVectorParts.end())
+        return false;
+    const auto& rObjectVersions = aPartIterator->second.maObjectChangeVersions;
+    auto aObjectIterator = rObjectVersions.find(nObjectId);
+    return aObjectIterator != rObjectVersions.end() && aObjectIterator->second > nSince;
+}
+
+bool SdXImpressDocument::isVectorMasterChangedSince(sal_Int32 nPart, sal_uInt64 nSince) const
+{
+    auto aIterator = maVectorParts.find(nPart);
+    return aIterator != maVectorParts.end() && aIterator->second.mnMasterChangeVersion > nSince;
+}
+
 void SdXImpressDocument::Notify( SfxBroadcaster& rBC, const SfxHint& rHint )
 {
     if( mpDoc )
@@ -2022,6 +2167,70 @@ void SdXImpressDocument::Notify( SfxBroadcaster& rBC, const SfxHint& rHint )
                 document::EventObject aEvent;
                 if( SvxUnoDrawMSFactory::createEvent( mpDoc, pSdrHint, aEvent ) )
                     notifyEvent( aEvent );
+            }
+
+            // A changed, inserted or removed object changes the vector
+            // content of its slide, so count that slide's version up.
+            const SdrHintKind eKind = pSdrHint->GetKind();
+            if (eKind == SdrHintKind::ObjectChange
+                || eKind == SdrHintKind::ObjectInserted
+                || eKind == SdrHintKind::ObjectRemoved)
+            {
+                if (const SdrObject* pObject = pSdrHint->GetObject())
+                {
+                    const SdPage* pPage
+                        = dynamic_cast<const SdPage*>(pObject->getSdrPageFromSdrObject());
+                    if (pPage && pPage->GetPageKind() == PageKind::Standard)
+                    {
+                        if (pPage->IsMasterPage())
+                        {
+                            // An object on a slide master is drawn on every
+                            // slide that uses that master, so count up the
+                            // version of each of those slides and remember
+                            // it as a master change. The page number of a
+                            // master is its position in the separate
+                            // master-page list, so it does not name a slide.
+                            const sal_uInt16 nPageCount
+                                = mpDoc->GetSdPageCount(PageKind::Standard);
+                            for (sal_uInt16 nPage = 0; nPage < nPageCount; ++nPage)
+                            {
+                                const SdPage* pStandardPage
+                                    = mpDoc->GetSdPage(nPage, PageKind::Standard);
+                                if (pStandardPage && pStandardPage->TRG_HasMasterPage()
+                                    && &pStandardPage->TRG_GetMasterPage() == pPage)
+                                {
+                                    VectorPartState& rState = maVectorParts[nPage];
+                                    ++rState.mnVersion;
+                                    rState.mnMasterChangeVersion = rState.mnVersion;
+                                }
+                            }
+                        }
+                        else if (pPage->GetPageNum() > 0)
+                        {
+                            const sal_Int32 nPart = (pPage->GetPageNum() - 1) / 2;
+                            VectorPartState& rState = maVectorParts[nPart];
+                            ++rState.mnVersion;
+
+                            // A change inside a group redraws the whole
+                            // top-level object, so record it under the
+                            // top-level ancestor's id, the id the primitive
+                            // tree carries.
+                            const SdrObject* pTopLevel = pObject;
+                            while (const SdrObject* pParent
+                                   = pTopLevel->getParentSdrObjectFromSdrObject())
+                                pTopLevel = pParent;
+                            const sal_uInt64 nObjectId = pTopLevel->GetUniqueID();
+
+                            // Removing an object inside a group changes the
+                            // group, which stays alive, so only a removed
+                            // top-level object drops its change record.
+                            if (eKind == SdrHintKind::ObjectRemoved && pTopLevel == pObject)
+                                rState.maObjectChangeVersions.erase(nObjectId);
+                            else
+                                rState.maObjectChangeVersions[nObjectId] = rState.mnVersion;
+                        }
+                    }
+                }
             }
 
             if( pSdrHint->GetKind() == SdrHintKind::ModelCleared )
@@ -2066,12 +2275,18 @@ class VectorContentWriter
         = o3tl::convert(1.0, o3tl::Length::mm100, o3tl::Length::twip);
 
 public:
-    VectorContentWriter(SdDrawDocument* pDocument, SdXImpressDocument* pModel, sal_Int32 nPart = -1)
+    VectorContentWriter(SdDrawDocument* pDocument, SdXImpressDocument* pModel, sal_Int32 nPart = -1,
+                        sal_Int64 nSinceVersion = -1)
         : mpDocument(pDocument)
         , mpModel(pModel)
         , mnPart(nPart)
+        , mnSinceVersion(nSinceVersion)
     {
     }
+
+    /// A non-negative since-version asks for a delta against that version
+    /// rather than the full slide.
+    bool isDelta() const { return mnSinceVersion >= 0; }
 
     void write(tools::JsonWriter& rWriter)
     {
@@ -2081,7 +2296,17 @@ public:
 
         writeHeader(rWriter, pPage);
         setupProcessor(rWriter, pPage);
-        writeMasterPage(rWriter, pPage);
+        if (isDelta())
+        {
+            writeObjectOrder(rWriter, pPage);
+            // The master page is not an object on the slide, so a delta
+            // carries its content whenever it changed after the client's
+            // version.
+            if (mpModel->isVectorMasterChangedSince(mnResolvedPage, sal_uInt64(mnSinceVersion)))
+                writeMasterPage(rWriter, pPage);
+        }
+        else
+            writeMasterPage(rWriter, pPage);
         writePageObjects(rWriter, pPage);
     }
 
@@ -2116,13 +2341,17 @@ private:
 
     void writeHeader(tools::JsonWriter& rWriter, SdPage* pPage)
     {
-        rWriter.put("type", "vectorprimitives");
+        rWriter.put("type", isDelta() ? "vectorprimitivesdelta" : "vectorprimitives");
         rWriter.put("part", sal_Int32(mnResolvedPage));
+        rWriter.put("version", sal_Int64(mpModel->getVectorPartVersion(mnResolvedPage)));
 
-        rWriter.put("slideWidth",
-                    static_cast<sal_Int64>(pPage->GetWidth() * constTwipConversionFactor));
-        rWriter.put("slideHeight",
-                    static_cast<sal_Int64>(pPage->GetHeight() * constTwipConversionFactor));
+        // A delta reuses the slide size the client already has, so only a
+        // full response carries it.
+        if (!isDelta())
+        {
+            rWriter.put("slideWidth", sal_Int64(pPage->GetWidth() * constTwipConversionFactor));
+            rWriter.put("slideHeight", sal_Int64(pPage->GetHeight() * constTwipConversionFactor));
+        }
     }
 
     void setupProcessor(tools::JsonWriter& rWriter, SdPage* pPage)
@@ -2217,6 +2446,19 @@ private:
         }
     }
 
+    /// The order array lists every live object id on the page in z-order.
+    /// It is the authoritative object set and ordering for the part.
+    static void writeObjectOrder(tools::JsonWriter& rWriter, SdPage* pPage)
+    {
+        auto aOrderArray = rWriter.startArray("order");
+        for (size_t i = 0; i < pPage->GetObjCount(); ++i)
+        {
+            SdrObject* pObject = pPage->GetObj(i);
+            if (pObject)
+                rWriter.putSimpleValue(sal_Int64(pObject->GetUniqueID()));
+        }
+    }
+
     void writePageObjects(tools::JsonWriter& rWriter, SdPage* pPage)
     {
         auto aObjectsArray = rWriter.startArray("objects");
@@ -2227,13 +2469,31 @@ private:
             if (!pObject)
                 continue;
 
+            // A delta carries full content only for objects that changed
+            // after the client's version. The rest stay in the order list.
+            // The object being text-edited is always carried: its live text
+            // is not version-tracked until the edit is committed.
+            if (isDelta())
+            {
+                SdrTextObj* pTextObj = DynCastSdrTextObj(pObject);
+                const bool bBeingEdited = pTextObj && pTextObj->IsInEditMode();
+                if (!bBeingEdited
+                    && !mpModel->isVectorObjectChangedSince(
+                           mnResolvedPage, pObject->GetUniqueID(),
+                           sal_uInt64(mnSinceVersion)))
+                {
+                    continue;
+                }
+            }
+
             // Get view-independent primitives
             drawinglayer::primitive2d::Primitive2DContainer aPrimitives;
             pObject->GetViewContact().getViewIndependentPrimitive2DContainer(aPrimitives);
 
-            if (aPrimitives.empty())
-                continue;
-
+            // An object with an empty decomposition still gets an entry,
+            // with an empty primitive list. The object set then always
+            // matches the ids the order array carries, and content that
+            // became empty replaces what a client has cached.
             auto pObjectNode = rWriter.startStruct();
             rWriter.put("id", static_cast<sal_Int64>(pObject->GetUniqueID()));
             rWriter.put("name", pObject->GetName());
@@ -2247,6 +2507,7 @@ private:
     SdDrawDocument* mpDocument;
     SdXImpressDocument* mpModel;
     sal_Int32 mnPart;
+    sal_Int64 mnSinceVersion;
     sal_uInt16 mnResolvedPage = 0;
     std::optional<drawinglayer::Primitive2dJsonProcessor> maProcessor;
 };
@@ -2255,7 +2516,8 @@ private:
 
 bool SdXImpressDocument::supportsCommand(std::u16string_view rCommand)
 {
-    if (rCommand == u"VectorPrimitives" || rCommand == u"VectorRenderingGraphics")
+    if (rCommand == u"VectorPrimitives" || rCommand == u"VectorRenderingGraphics"
+        || rCommand == u"ExtractDocumentStructure")
         return true;
     return false;
 }
@@ -2268,8 +2530,15 @@ void SdXImpressDocument::getCommandValues(::tools::JsonWriter& rJsonWriter,
 
     if (o3tl::starts_with(rCommand, ".uno:ExtractDocumentStructure"))
     {
-        auto commentsNode = rJsonWriter.startNode("DocStructure");
-        GetDocStructureSlides(rJsonWriter, this, aMap);
+        OUString aFilter;
+        if (auto it = aMap.find(u"filter"_ustr); it != aMap.end())
+            aFilter = it->second;
+
+        auto aStructureNode = rJsonWriter.startNode("DocStructure");
+        if (aFilter == "text" || aFilter.startsWith("text,"))
+            GetDocStructureSlidesText(rJsonWriter, this);
+        else
+            GetDocStructureSlides(rJsonWriter, this, aMap);
     }
     else if (o3tl::starts_with(rCommand, ".uno:VectorRenderingGraphics"))
     {
@@ -2294,10 +2563,66 @@ void SdXImpressDocument::getCommandValues(::tools::JsonWriter& rJsonWriter,
         if (it != aMap.end())
             nPart = it->second.toInt32();
 
+        // A "since" version asks for a delta: only the objects that
+        // changed after that version, plus the current object order.
+        sal_Int64 nSinceVersion = -1;
+        auto aSinceIterator = aMap.find(u"since"_ustr);
+        if (aSinceIterator != aMap.end())
+            nSinceVersion = aSinceIterator->second.toInt64();
+
+        // A push asks for the delta since the version last pushed to the
+        // given view, then advances that mark, so the caller keeps no
+        // version state of its own.
+        const bool bPushDelta = aMap.find(u"pushdelta"_ustr) != aMap.end();
+        sal_Int32 nViewId = -1;
+        if (bPushDelta)
+        {
+            auto aViewIterator = aMap.find(u"viewid"_ustr);
+            if (aViewIterator != aMap.end())
+                nViewId = aViewIterator->second.toInt32();
+            nSinceVersion = static_cast<sal_Int64>(maVectorPushedVersions[nViewId][nPart]);
+        }
+
         if (mpDoc)
         {
-            VectorContentWriter aContentWriter(mpDoc, this, nPart);
+            // Keep the text being edited in the decomposition: vector
+            // rendering has no edit-view overlay to draw it otherwise.
+            comphelper::COKit::setVectorRendering(true);
+            comphelper::ScopeGuard aVectorRenderingGuard(
+                [] { comphelper::COKit::setVectorRendering(false); });
+
+            VectorContentWriter aContentWriter(mpDoc, this, nPart, nSinceVersion);
             aContentWriter.write(rJsonWriter);
+
+            if (bPushDelta)
+            {
+                maVectorPushedVersions[nViewId][nPart] = getVectorPartVersion(nPart);
+
+                // Views come and go over the document's life, so drop the
+                // push marks of views that no longer exist.
+                std::unordered_set<sal_Int32> aLiveViewIds;
+                const SfxViewShell* pShell = SfxViewShell::GetFirst(false);
+                while (pShell)
+                {
+                    aLiveViewIds.insert(sal_Int32(pShell->GetViewShellId().get()));
+                    pShell = SfxViewShell::GetNext(*pShell, false);
+                }
+                std::erase_if(maVectorPushedVersions,
+                              [&aLiveViewIds](const auto& rEntry)
+                              { return aLiveViewIds.find(rEntry.first) == aLiveViewIds.end(); });
+            }
+            else if (nPart >= 0)
+            {
+                // A pull leaves the requesting view holding the slide at this
+                // version. Record it as that view's push baseline so the
+                // first push to the view carries only later changes instead
+                // of the whole slide again.
+                if (const SfxViewShell* pCurrentView = SfxViewShell::Current())
+                {
+                    const sal_Int32 nCurrentViewId = sal_Int32(pCurrentView->GetViewShellId().get());
+                    maVectorPushedVersions[nCurrentViewId][nPart] = getVectorPartVersion(nPart);
+                }
+            }
         }
     }
 }
@@ -2630,12 +2955,17 @@ uno::Reference< container::XNameContainer > SAL_CALL SdXImpressDocument::getCust
 // XPresentationSupplier
 uno::Reference< presentation::XPresentation > SAL_CALL SdXImpressDocument::getPresentation()
 {
+    return getSlideShow();
+}
+
+rtl::Reference< sd::SlideShow > SdXImpressDocument::getSlideShow()
+{
     ::SolarMutexGuard aGuard;
 
     if( nullptr == mpDoc )
         throw lang::DisposedException();
 
-    return mpDoc->getPresentation();
+    return mpDoc->getSlideShow();
 }
 
 // XHandoutMasterSupplier
@@ -3128,6 +3458,13 @@ void SAL_CALL SdXImpressDocument::setPropertyValue( const OUString& aPropertyNam
                 mpDoc->GetSectionManager().SetSectionsFromPropertyValues(aSections);
             break;
         }
+        case WID_MODEL_ANIMATIONSOUNDLINK:
+        {
+            bool bHasLink = false;
+            if (aValue >>= bHasLink)
+                mpDoc->SetMaybeHasAnimationSoundLinks(bHasLink);
+            break;
+        }
         case WID_MODEL_THEME:
             getSdrModelFromUnoModel().setTheme(model::Theme::FromAny(aValue));
             break;
@@ -3259,6 +3596,9 @@ cpo::uno::Any SAL_CALL SdXImpressDocument::getPropertyValue( const OUString& Pro
             break;
         case WID_MODEL_SLIDESECTIONS:
             aAny <<= mpDoc->GetSectionManager().GetSectionsAsPropertyValues();
+            break;
+        case WID_MODEL_ANIMATIONSOUNDLINK:
+            aAny <<= mpDoc->MaybeHasAnimationSoundLinks();
             break;
         case WID_MODEL_THEME:
             if (auto const& pTheme = getSdrModelFromUnoModel().getTheme())

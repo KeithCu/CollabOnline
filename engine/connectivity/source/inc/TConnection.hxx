@@ -49,7 +49,7 @@ namespace connectivity
                                                         //  for this Connection
         OUString                        m_sURL;
         rtl_TextEncoding                m_nTextEncoding; // the encoding which is used for all text conversions
-        css::uno::WeakReference< css::sdbc::XDatabaseMetaData >
+        cpo::uno::WeakReference< css::sdbc::XDatabaseMetaData >
                                         m_xMetaData;
         SharedResources                 m_aResources;
     public:
@@ -69,10 +69,10 @@ namespace connectivity
             getConnectionInfo() const { return m_aConnectionInfo; }
 
         // OComponentHelper
-        virtual void SAL_CALL disposing() override;
+        virtual void disposing() override;
 
         //XUnoTunnel
-        virtual sal_Int64 SAL_CALL getSomething( const cpo::uno::Sequence< sal_Int8 >& aIdentifier ) override;
+        virtual sal_Int64 getSomething( const cpo::uno::Sequence< sal_Int8 >& aIdentifier ) override;
         static const cpo::uno::Sequence< sal_Int8 > & getUnoTunnelId();
     };
 }

@@ -16,6 +16,7 @@
 #include <markdata.hxx>
 #include <rangelst.hxx>
 #include <viewdata.hxx>
+#include <docfuncutil.hxx>
 #include <SheetViewManager.hxx>
 #include <SheetView.hxx>
 #include <undo/UndoSheetViewSortData.hxx>
@@ -292,6 +293,8 @@ void Operation::syncSheetViews(UndoSheetViewSortData* pUndoSortData)
             pUndoSortData->setAutoFilterRange(aAutoFilterRangeBefore, aAutoFilterRangeAfter);
         }
     }
+
+    invalidateSheetViewParts();
 }
 
 void Operation::syncCellToSheetViews(const ScAddress& rDefaultViewAddress,
@@ -380,6 +383,8 @@ void Operation::syncCellToSheetViews(const ScAddress& rDefaultViewAddress,
             pDocShell->PostPaintCell(aSheetViewAddress);
         }
     }
+
+    invalidateSheetViewParts();
 }
 
 void Operation::syncCellPatternToSheetViews(const ScAddress& rDefaultViewAddress,
@@ -423,6 +428,8 @@ void Operation::syncCellPatternToSheetViews(const ScAddress& rDefaultViewAddress
                                  SC_PF_LINES | SC_PF_TESTMERGE);
         }
     }
+
+    invalidateSheetViewParts();
 }
 
 void Operation::syncMarkPatternToSheetViews(const ScMarkData& rDefaultViewMark,
@@ -524,6 +531,17 @@ void Operation::syncMarkPatternToSheetViews(const ScMarkData& rDefaultViewMark,
                                  PaintPartFlags::Grid, SC_PF_LINES | SC_PF_TESTMERGE);
         }
     }
+
+    invalidateSheetViewParts();
+}
+
+void Operation::invalidateSheetViewParts()
+{
+    if (!mpViewData)
+        return;
+
+    if (ScDocShell* pDocShell = mpViewData->GetDocShell())
+        DocFuncUtil::invalidateSheetViewTiles(*pDocShell, mpViewData->GetDefaultViewTab());
 }
 
 bool Operation::isInputOnSheetView() const { return getCurrentSheetView(mpViewData) != nullptr; }

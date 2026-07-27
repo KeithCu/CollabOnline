@@ -21,12 +21,17 @@ $(eval $(call gb_Module_Module,cppcanvas))
 
 $(eval $(call gb_Module_add_targets,cppcanvas,\
 	Library_cppcanvas \
-	Library_mtfrenderer \
 ))
 
 # FIXME: should generalize these ...
 $(eval $(call gb_Module_add_check_targets,cppcanvas,\
     CppunitTest_cppcanvas_test \
 ))
+
+ifneq ($(DISPLAY),)
+$(eval $(call gb_Module_add_slowcheck_targets,cppcanvas,\
+    CppunitTest_cppcanvas_emfplus \
+))
+endif
 
 # vim: set noet sw=4 ts=4:

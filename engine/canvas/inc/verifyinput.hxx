@@ -43,7 +43,6 @@ namespace com::sun::star::rendering
     struct StrokeAttributes;
     struct Texture;
     struct ViewState;
-    struct IntegerBitmapLayout;
     struct FontRequest;
 }
 
@@ -257,27 +256,6 @@ namespace canvastools
                           const char*                                   pStr,
                           const css::uno::Reference< css::uno::XInterface >& xIf,
                           ::sal_Int16                                   nArgPos );
-
-        /** Basic check for bitmap layout validity.
-
-            @param bitmapLayout
-            Bitmap layout to check
-
-            @param xIf
-            The interface that should be reported as the one
-            generating the exception.
-
-            @param nArgPos
-            Argument position on the call site (i.e. the position of
-            the argument, checked here, on the UNO interface
-            method. Counting starts at 0).
-
-            @throws a lang::IllegalArgumentException, if anything is wrong
-         */
-        CANVASTOOLS_DLLPUBLIC void verifyInput( const css::rendering::IntegerBitmapLayout&     bitmapLayout,
-                          const char*                                               pStr,
-                          const css::uno::Reference< css::uno::XInterface >&        xIf,
-                          ::sal_Int16                                               nArgPos );
 
         /** Basic check for font request validity.
 
@@ -498,30 +476,6 @@ namespace canvastools
             }
         }
 
-        /** Range checker, which throws css::lang::IllegalArgument exception, when
-            range is violated
-
-            The checked range is half open, i.e. only bound by the specified value.
-
-            @param arg
-            Arg to check
-
-            @param bound
-            Bound to check against
-
-            @param bLowerBound
-            When true, given bound is the lower bound. When false,
-            given bound is the upper bound.
-        */
-        template< typename NumType > inline void verifyRange( NumType arg, NumType bound, bool bLowerBound=true )
-        {
-            if( (bLowerBound && arg < bound) ||
-                (!bLowerBound && arg > bound) )
-            {
-                throw css::lang::IllegalArgumentException();
-            }
-        }
-
         /** Range checker, which throws css::lang::IndexOutOfBounds exception, when
             index range is violated
 
@@ -556,15 +510,6 @@ namespace canvastools
                                const char*                                      pStr,
                                const css::uno::Reference< css::uno::XInterface >&     xIf );
 
-        /** Range checker, which throws css::lang::IndexOutOfBounds exception, when
-            the size is negative or null
-
-            @param size
-            Size to verify
-         */
-        CANVASTOOLS_DLLPUBLIC void verifySpriteSize( const css::geometry::RealSize2D& size,
-                               const char*                                   pStr,
-                               const css::uno::Reference< css::uno::XInterface >&  xIf );
 }
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

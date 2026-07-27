@@ -476,6 +476,15 @@ public:
     /// is equal to nCurrentTabIndex
     static void notifyAllViewsSheetGeomInvalidation(const SfxViewShell* pForViewShell, bool bColumns, bool bRows, bool bSizes,
                                                     bool bHidden, bool bFiltered, bool bGroups, SCTAB nCurrentTabIndex);
+    /// Drops the cached accumulated column or row positions of sheet nTab from index nStart on,
+    /// in every view of the document of pForViewShell. The next position lookup recomputes them
+    /// from the document.
+    static void invalidateAllViewsKitPositions(const SfxViewShell* pForViewShell, bool bColumns,
+                                               SCTAB nTab, SCCOLROW nStart);
+    /// Drops all cached accumulated column and row positions of every sheet view holder table
+    /// of nDefaultViewTab, in every view of the document.
+    static void invalidateAllViewsKitSheetViewPositions(ScDocShell& rDocShell,
+                                                        SCTAB nDefaultViewTab);
     void KitSendFormulabarUpdate(const EditView* pEditView, const OUString& rText, const ESelection& rSelection);
     css::uno::Reference<css::drawing::XShapes> getSelectedXShapes();
     SC_DLLPUBLIC static css::uno::Reference<css::datatransfer::XTransferable2> GetClipData(vcl::Window* pWin);

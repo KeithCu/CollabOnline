@@ -127,11 +127,6 @@ namespace com::sun::star::awt {
     class XGraphics;
 }
 
-namespace com::sun::star::rendering {
-    class XCanvas;
-    class XSpriteCanvas;
-}
-
 // OutputDevice-Types
 
 enum OutDevType { OUTDEV_WINDOW, OUTDEV_PRINTER, OUTDEV_VIRDEV, OUTDEV_PDF };
@@ -182,8 +177,6 @@ private:
     std::unique_ptr<ImplOutDevData> mpOutDevData;
     std::vector< VCLXGraphics* >*   mpUnoGraphicsList;
     vcl::ExtOutDevData*             mpExtOutDevData;
-    // The canvas interface for this output device. Is persistent after the first GetCanvas() call
-    mutable css::uno::WeakReference< css::rendering::XCanvas >    mxCanvas;
 
     /// Additional output pixel offset, applied in LogicToPixel (used by SetPixelOffset/GetPixelOffset)
     tools::Long                            mnOutOffOrigX;
@@ -281,8 +274,6 @@ public:
     SystemGraphicsData          GetSystemGfxData() const;
     OUString                    GetRenderBackendName() const;
 
-    SAL_DLLPRIVATE cpo::uno::Any GetSystemGfxDataAny() const;
-
     void                        SetRefPoint();
     void                        SetRefPoint( const Point& rRefPoint );
     const Point&                GetRefPoint() const { return maRefPoint; }
@@ -314,11 +305,6 @@ public:
     std::vector< VCLXGraphics* > *CreateUnoGraphicsList();
 
     virtual size_t               GetSyncCount() const { return 0xffffffff; }
-
-    /// request XCanvas render interface
-    css::uno::Reference< css::rendering::XCanvas > GetCanvas() const;
-    /// request XSpriteCanvas render interface
-    css::uno::Reference< css::rendering::XSpriteCanvas > GetSpriteCanvas() const;
 
     virtual bool CanAnimate() const = 0;
 
@@ -437,9 +423,6 @@ protected:
     SAL_DLLPRIVATE void         drawOutDevDirect(const OutputDevice& rSrcDev, SalTwoRect& rPosAry);
 
     SAL_DLLPRIVATE bool         is_double_buffered_window() const;
-
-    virtual css::uno::Reference< css::rendering::XCanvas > ImplGetCanvas( bool bSpriteCanvas ) const;
-    SAL_DLLPRIVATE void         ImplDisposeCanvas();
 
 private:
 

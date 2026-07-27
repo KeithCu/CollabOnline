@@ -13,16 +13,36 @@
 	// Mapping from proxyId to { on: { method: handler, ... }, detach } objects:
 	const listeners = Object.create(null);
 
-	function attachTrampoline(typeName, proxyId, fnSrc) {
-		const parts = typeName.split('.');
-		let type = uno.idl;
-		for (const p of parts) type = type[p];
-		const proxy = $internal.createProxy(type, proxyId);
-		(0, eval)('(' + fnSrc + ')')(proxy);
+	let nextDialogId = 0;
+	// Pending cool.dialog.open() calls, keyed by dialogId, each holding the
+	// promise's { resolve } so Extension_DialogResult can settle it:
+	const pendingDialogs = Object.create(null);
+
+	function attachTrampoline(typeName, proxyId, fnSrc, facade) {
+		$internal.suppressLegacyUnoApiStart();
+		let ended = false;
+		try {
+			const parts = typeName.split('.');
+			let type = uno.idl;
+			for (const p of parts) type = type[p];
+			if (!facade) {
+				$internal.suppressLegacyUnoApiEnd();
+				ended = true;
+			}
+			const proxy = $internal.createProxy(type, proxyId);
+			(0, eval)('(' + fnSrc + ')')(proxy);
+		} finally {
+			if (!ended) $internal.suppressLegacyUnoApiEnd();
+		}
 	}
-	function detachTrampoline(proxyId, fnSrc) {
-		const proxy = $internal.takeProxy(proxyId);
-		(0, eval)('(' + fnSrc + ')')(proxy);
+	function detachTrampoline(proxyId, fnSrc, facade) {
+		if (facade) $internal.suppressLegacyUnoApiStart();
+		try {
+			const proxy = $internal.takeProxy(proxyId);
+			(0, eval)('(' + fnSrc + ')')(proxy);
+		} finally {
+			if (facade) $internal.suppressLegacyUnoApiEnd();
+		}
 	}
 
 	// Takes a function `fn` followed by arguments `args`.  Runs `fn.apply(null, args)` inside a
@@ -66,22 +86,68 @@
 	// as the listener method's return value (only relevant for non-void methods).
 	//
 	// Returns a handle with a `.detach()` method.
-	window.cool.attachListener = function (typeName, spec) {
+	function attachListenerImpl(typeName, spec, facade) {
 		const proxyId = 'p' + (nextProxyId++);
 		listeners[proxyId] = {
 			on: spec.on,
-			detach: spec.detach
+			detach: spec.detach,
+			facade: facade
 		};
-		window.cool.callRemote(attachTrampoline, typeName, proxyId, spec.attach.toString());
+		window.cool.callRemote(
+			attachTrampoline, typeName, proxyId, spec.attach.toString(), facade);
 		return {
 			detach: function () {
 				const entry = listeners[proxyId];
 				if (!entry) return;
 				delete listeners[proxyId];
 				window.cool.callRemote(
-					detachTrampoline, proxyId, entry.detach.toString());
+					detachTrampoline, proxyId, entry.detach.toString(), entry.facade);
 			}
 		};
+	}
+	window.cool.attachListener = function (typeName, spec) {
+		return attachListenerImpl(typeName, spec, false);
+	};
+
+	// Open a modal dialog whose content is a page under the extension's own base URL, and
+	// return a Promise that resolves when the dialog closes.  The resolved value is
+	// { cancelled: true } if the user dismissed the dialog (titlebar close, Esc,
+	// cool.dialog.cancel()), otherwise { cancelled: false,
+	// value: <whatever cool.dialog.close(value) received> in the dialog iframe }.  Only one
+	// dialog is allowed at a time per extension; a second call while one is open resolves
+	// immediately as cancelled.
+	//
+	// The dialog iframe loads its own copy of this cool.js and uses cool.dialog.close/
+	// cool.dialog.cancel to dismiss itself.  It can also use cool.callRemote etc.
+	//
+	// opts: { url, title, width, height }.  url is relative to the extension's base URL.
+	window.cool.dialog = {
+		open: function (opts) {
+			const dialogId = 'd' + (nextDialogId++);
+			const promise = new Promise(function (resolve) {
+				pendingDialogs[dialogId] = { resolve: resolve };
+			});
+			window.parent.postMessage(JSON.stringify({
+				msgId: 'Extension_ShowDialog',
+				dialogId: dialogId,
+				url: opts.url,
+				title: opts.title,
+				width: opts.width,
+				height: opts.height,
+			}), '*');
+			return promise;
+		},
+		close: function (value) {
+			window.parent.postMessage(JSON.stringify({
+				msgId: 'Extension_DialogClose',
+				value: value === undefined ? null : value,
+			}), '*');
+		},
+		cancel: function () {
+			window.parent.postMessage(JSON.stringify({
+				msgId: 'Extension_DialogCancel',
+			}), '*');
+		},
 	};
 
 	// Define a property on cool.document that lazily wires a UNO listener of `typeName` to the
@@ -103,11 +169,11 @@
 			set: function (fn) {
 				current = (typeof fn === 'function') ? fn : null;
 				if (current && !handle) {
-					handle = window.cool.attachListener(typeName, {
+					handle = attachListenerImpl(typeName, {
 						attach: attachFn,
 						detach: detachFn,
 						on: on
-					});
+					}, true);
 				} else if (!current && handle) {
 					handle.detach();
 					handle = null;
@@ -162,7 +228,7 @@
 			const entry = listeners[proxyId];
 			delete listeners[proxyId];
 			window.cool.callRemote(
-				detachTrampoline, proxyId, entry.detach.toString());
+				detachTrampoline, proxyId, entry.detach.toString(), entry.facade);
 		}
 	}
 
@@ -230,6 +296,16 @@
 					console.warn('cool.document.' + handlerName + ' threw:', err);
 				}
 			}
+		} else if (data.msgId === 'Extension_DialogResult') {
+			const entry = pendingDialogs[data.dialogId];
+			if (!entry) {
+				console.warn('Extension_DialogResult: unknown dialogId ' + data.dialogId);
+				return;
+			}
+			delete pendingDialogs[data.dialogId];
+			entry.resolve(data.cancelled
+				? { cancelled: true }
+				: { cancelled: false, value: data.value });
 		} else if (data.msgId === 'Extension_Teardown') {
 			detachAll();
 			window.parent.postMessage(JSON.stringify({
@@ -246,13 +322,16 @@
 	});
 
 	// Tell the parent how tall our content actually is so it can size the
-	// hosting iframe element to the document body's scrollHeight (i.e. fit
+	// hosting iframe element to the document body's offsetHeight (i.e. fit
 	// without scrollbars inside the iframe).  Uses ResizeObserver if
 	// available; falls back to a single send after load.  This works
 	// regardless of origin because it's a postMessage, not direct DOM
-	// access on the parent side.
+	// access on the parent side.  Use body.offsetHeight rather than
+	// documentElement.scrollHeight because the latter is clamped to at least the iframe's
+	// viewport height and would prevent shrinking when the content is smaller than the current
+	// iframe.
 	function postHeight() {
-		const h = document.documentElement.scrollHeight;
+		const h = document.body.offsetHeight;
 		window.parent.postMessage(JSON.stringify({
 			msgId: 'Extension_Resize',
 			height: h
@@ -260,6 +339,6 @@
 	}
 	window.addEventListener('load', postHeight);
 	if (typeof ResizeObserver !== 'undefined') {
-		new ResizeObserver(postHeight).observe(document.documentElement);
+		new ResizeObserver(postHeight).observe(document.body);
 	}
 })();

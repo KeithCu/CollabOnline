@@ -9,6 +9,7 @@
 
 #include <sctiledrenderingtest.hxx>
 
+#include <tools/json_writer.hxx>
 #include <comphelper/kit.hxx>
 #include <comphelper/propertyvalue.hxx>
 #include <comphelper/propertysequence.hxx>
@@ -606,6 +607,194 @@ CPPUNIT_TEST_FIXTURE(SheetViewTest, testSyncValuesBetweenMainSheetAndSheetView)
 
     CPPUNIT_ASSERT_EQUAL(u"ABC123"_ustr, pDocument->GetString(aA2));
     CPPUNIT_ASSERT_EQUAL(u"ABC123"_ustr, pDocument->GetString(aA2SheetView));
+}
+
+CPPUNIT_TEST_FIXTURE(SheetViewTest, testCellEditInvalidatesBaseSheetTiles)
+{
+    // Editing a cell while inside a sheet view must invalidate the tiles of
+    // the base sheet as well, even though no view is currently showing it. The
+    // normal paint path only invalidates the tab a view is currently
+    // displaying, so without the extra invalidation the base sheet keeps
+    // rendering the old value until it is refreshed.
+
+    ScModelObj* pModelObj = createDoc("empty.ods");
+    pModelObj->initializeForTiledRendering(cpo::uno::Sequence<beans::PropertyValue>());
+    ScDocument* pDocument = pModelObj->GetDocument();
+
+    // Report the part in each tile invalidation so the test can tell which
+    // sheet was invalidated.
+    comphelper::COKit::setPartInInvalidation(true);
+    comphelper::ScopeGuard aPartGuard([] { comphelper::COKit::setPartInInvalidation(false); });
+
+    ScTestViewCallback aView;
+    ScTabViewShell* pTabView = aView.getTabViewShell();
+
+    // Enter a sheet view of Sheet1. Layout becomes [Sheet1 (base) = 0,
+    // Sheet1 (sheet view) = 1] and the view moves onto the sheet view.
+    createNewSheetViewInCurrentView();
+    Scheduler::ProcessEventsToIdle();
+    const SCTAB nBaseTab(0);
+    const SCTAB nSheetViewTab(1);
+    CPPUNIT_ASSERT_EQUAL(nSheetViewTab, pTabView->GetViewData().GetTabNumber());
+
+    aView.ClearAllInvalids();
+
+    // Edit A1 on the sheet view. The write reaches the base sheet and is
+    // mirrored back into the sheet view.
+    typeCharsInCell(std::string("XYZ"), 0, 0, pTabView, pModelObj);
+    Scheduler::ProcessEventsToIdle();
+
+    // The new value is present on both the sheet view and the base sheet.
+    CPPUNIT_ASSERT_EQUAL(u"XYZ"_ustr, pDocument->GetString(ScAddress(0, 0, nSheetViewTab)));
+    CPPUNIT_ASSERT_EQUAL(u"XYZ"_ustr, pDocument->GetString(ScAddress(0, 0, nBaseTab)));
+
+    // The base sheet, which no view is currently showing, must be among the
+    // invalidated parts.
+    bool bBaseInvalidated = false;
+    for (int nInvalidatedPart : aView.m_aInvalidationsParts)
+    {
+        if (nInvalidatedPart == int(nBaseTab))
+        {
+            bBaseInvalidated = true;
+            break;
+        }
+    }
+    CPPUNIT_ASSERT_MESSAGE("Base sheet tiles were not invalidated by a cell edit in a sheet view",
+                           bBaseInvalidated);
+}
+
+CPPUNIT_TEST_FIXTURE(SheetViewTest, testUndoInvalidatesBaseSheetTiles)
+{
+    // Undoing a cell edit made inside a sheet view must invalidate the tiles of
+    // the base sheet too, so it stops rendering the value that was just undone.
+
+    ScModelObj* pModelObj = createDoc("empty.ods");
+    pModelObj->initializeForTiledRendering(cpo::uno::Sequence<beans::PropertyValue>());
+    ScDocument* pDocument = pModelObj->GetDocument();
+
+    comphelper::COKit::setPartInInvalidation(true);
+    comphelper::ScopeGuard aPartGuard([] { comphelper::COKit::setPartInInvalidation(false); });
+
+    ScTestViewCallback aView;
+    ScTabViewShell* pTabView = aView.getTabViewShell();
+
+    createNewSheetViewInCurrentView();
+    Scheduler::ProcessEventsToIdle();
+    const SCTAB nBaseTab(0);
+    const SCTAB nSheetViewTab(1);
+    CPPUNIT_ASSERT_EQUAL(nSheetViewTab, pTabView->GetViewData().GetTabNumber());
+
+    // Edit A1 on the sheet view, then discard the invalidations from the edit
+    // so only the undo's invalidations remain.
+    typeCharsInCell(std::string("XYZ"), 0, 0, pTabView, pModelObj);
+    Scheduler::ProcessEventsToIdle();
+    aView.ClearAllInvalids();
+
+    undo();
+    Scheduler::ProcessEventsToIdle();
+
+    // The value is gone from both the sheet view and the base sheet.
+    CPPUNIT_ASSERT_EQUAL(OUString(), pDocument->GetString(ScAddress(0, 0, nSheetViewTab)));
+    CPPUNIT_ASSERT_EQUAL(OUString(), pDocument->GetString(ScAddress(0, 0, nBaseTab)));
+
+    // The base sheet, which no view is currently showing, must be among the
+    // invalidated parts after the undo.
+    bool bBaseInvalidated = false;
+    for (int nInvalidatedPart : aView.m_aInvalidationsParts)
+    {
+        if (nInvalidatedPart == int(nBaseTab))
+        {
+            bBaseInvalidated = true;
+            break;
+        }
+    }
+    CPPUNIT_ASSERT_MESSAGE("Base sheet tiles were not invalidated when undoing a sheet view edit",
+                           bBaseInvalidated);
+}
+
+CPPUNIT_TEST_FIXTURE(SheetViewTest, testUndoInvalidatesCurrentSheetViewTiles)
+{
+    // Undoing a cell edit made inside a sheet view must invalidate the tiles of
+    // the sheet view the user is currently on. The undo repaints only the base
+    // sheet, so without an explicit invalidation of the shown part the current
+    // sheet view keeps rendering the value that was just undone even though its
+    // data is already correct.
+
+    ScModelObj* pModelObj = createDoc("empty.ods");
+    pModelObj->initializeForTiledRendering(cpo::uno::Sequence<beans::PropertyValue>());
+    ScDocument* pDocument = pModelObj->GetDocument();
+
+    comphelper::COKit::setPartInInvalidation(true);
+    comphelper::ScopeGuard aPartGuard([] { comphelper::COKit::setPartInInvalidation(false); });
+
+    ScTestViewCallback aView;
+    ScTabViewShell* pTabView = aView.getTabViewShell();
+
+    createNewSheetViewInCurrentView();
+    Scheduler::ProcessEventsToIdle();
+    const SCTAB nSheetViewTab(1);
+    CPPUNIT_ASSERT_EQUAL(nSheetViewTab, pTabView->GetViewData().GetTabNumber());
+
+    // Edit A1 on the sheet view, then discard the invalidations from the edit
+    // so only the undo's invalidations remain.
+    typeCharsInCell(std::string("XYZ"), 0, 0, pTabView, pModelObj);
+    Scheduler::ProcessEventsToIdle();
+    aView.ClearAllInvalids();
+
+    undo();
+    Scheduler::ProcessEventsToIdle();
+
+    // The value is gone from the sheet view the user is on.
+    CPPUNIT_ASSERT_EQUAL(OUString(), pDocument->GetString(ScAddress(0, 0, nSheetViewTab)));
+
+    // The sheet view the user is currently on must be among the invalidated
+    // parts after the undo.
+    bool bSheetViewInvalidated = false;
+    for (int nInvalidatedPart : aView.m_aInvalidationsParts)
+    {
+        if (nInvalidatedPart == int(nSheetViewTab))
+        {
+            bSheetViewInvalidated = true;
+            break;
+        }
+    }
+    CPPUNIT_ASSERT_MESSAGE(
+        "Current sheet view tiles were not invalidated when undoing a sheet view edit",
+        bSheetViewInvalidated);
+}
+
+CPPUNIT_TEST_FIXTURE(SheetViewTest, testUndoFormattingOnSheetViewKeepsView)
+{
+    // Undoing or redoing a formatting change made inside a sheet view must keep
+    // the view on the sheet view. The formatting undo restores the view to the
+    // changed range's tab, which is the base sheet, so it used to pull the view
+    // off the sheet view onto the base sheet.
+
+    ScModelObj* pModelObj = createDoc("empty.ods");
+    pModelObj->initializeForTiledRendering(cpo::uno::Sequence<beans::PropertyValue>());
+
+    ScTestViewCallback aView;
+    ScTabViewShell* pTabView = aView.getTabViewShell();
+
+    // Enter a sheet view of Sheet1. The view moves onto the sheet view tab.
+    createNewSheetViewInCurrentView();
+    Scheduler::ProcessEventsToIdle();
+    const SCTAB nSheetViewTab(1);
+    CPPUNIT_ASSERT_EQUAL(nSheetViewTab, pTabView->GetViewData().GetTabNumber());
+
+    // Make A1 bold on the sheet view.
+    setCellBold(u"A1");
+    Scheduler::ProcessEventsToIdle();
+    CPPUNIT_ASSERT_EQUAL(nSheetViewTab, pTabView->GetViewData().GetTabNumber());
+
+    undo();
+    Scheduler::ProcessEventsToIdle();
+    // The view stays on the sheet view rather than switching to the base sheet.
+    CPPUNIT_ASSERT_EQUAL(nSheetViewTab, pTabView->GetViewData().GetTabNumber());
+
+    redo();
+    Scheduler::ProcessEventsToIdle();
+    CPPUNIT_ASSERT_EQUAL(nSheetViewTab, pTabView->GetViewData().GetTabNumber());
 }
 
 CPPUNIT_TEST_FIXTURE(SheetViewTest, testRemoveSheetView)
@@ -6240,6 +6429,126 @@ CPPUNIT_TEST_FIXTURE(SyncTest, testSync_OperationInvalidatesOtherView)
         CPPUNIT_ASSERT_MESSAGE("default view callback should receive an invalidation",
                                std::ranges::find(rDefaultViewParts, 0) != rDefaultViewParts.end());
     }
+}
+
+CPPUNIT_TEST_FIXTURE(SheetViewTest, testFreezePaneScrolledExportXLSX)
+{
+    // A frozen sheet (cols A-B + rows 1-5) whose top-left pane carries a
+    // scroll offset (sheetView topLeftCell="A6") must keep its freeze when saved
+    // to XLSX. In the LOK model the frozen pane is anchored at the sheet corner,
+    // so the exported xSplit/ySplit must equal the freeze position and not be
+    // reduced by that scroll offset - which used to collapse ySplit to 0 and drop
+    // the row freeze on reload (columns survived only because there was no
+    // horizontal scroll).
+
+    ScModelObj* pModelObj = createDoc("freezePaneScrolled.xlsx");
+    pModelObj->initializeForTiledRendering(cpo::uno::Sequence<beans::PropertyValue>());
+    Scheduler::ProcessEventsToIdle();
+
+    // Cursor in C6 and freeze rows and columns.
+    gotoCell(u"C6");
+    Scheduler::ProcessEventsToIdle();
+    dispatchCommand(mxComponent, u".uno:FreezePanes"_ustr, {});
+    Scheduler::ProcessEventsToIdle();
+
+    skipValidation();
+    save(TestFilter::XLSX);
+
+    xmlDocUniquePtr pSheet = parseExport(u"xl/worksheets/sheet1.xml"_ustr);
+    CPPUNIT_ASSERT(pSheet);
+
+    // Columns A-B and rows 1-5 must both stay frozen.
+    CPPUNIT_ASSERT_EQUAL(u"2"_ustr, getXPath(pSheet, "//x:sheetViews//x:pane", "xSplit"));
+    CPPUNIT_ASSERT_EQUAL(u"5"_ustr, getXPath(pSheet, "//x:sheetViews//x:pane", "ySplit"));
+    // Frozen pane anchored at A1; the scrollable pane starts at C6.
+    CPPUNIT_ASSERT_EQUAL(u"A1"_ustr, getXPath(pSheet, "//x:sheetViews/x:sheetView", "topLeftCell"));
+    CPPUNIT_ASSERT_EQUAL(u"C6"_ustr, getXPath(pSheet, "//x:sheetViews//x:pane", "topLeftCell"));
+}
+
+CPPUNIT_TEST_FIXTURE(SyncTest, testSheetViewRowsKeepPositionAfterDefaultViewEdit)
+{
+    // An edit in the default view syncs the content, including the recomputed row heights, to
+    // every sheet view holder table. A view showing a sheet view that already resolved row
+    // positions for that area must place the rows below the changed one at their new
+    // positions, the same as a freshly created view does, and the client of that view has to
+    // be told that the sheet geometry it caches changed.
+    comphelper::COKit::setCompatFlag(comphelper::COKit::Compat::scPrintTwipsMsgs);
+    ScModelObj* pModelObj = createDoc("empty.ods");
+    pModelObj->initializeForTiledRendering(cpo::uno::Sequence<beans::PropertyValue>());
+    ScDocument* pDocument = pModelObj->GetDocument();
+    CPPUNIT_ASSERT(pDocument);
+
+    // A distant multiline cell whose row is tall, with text in the neighbouring rows, set up
+    // before the sheet view exists so the holder table starts with the same content.
+    const SCROW nRow = 9840;
+    for (SCROW nR = nRow - 3; nR <= nRow + 3; ++nR)
+        if (nR != nRow)
+            pDocument->SetString(ScAddress(0, nR, 0), "row " + OUString::number(nR + 1));
+    ScFieldEditEngine& rEngine = pDocument->GetEditEngine();
+    rEngine.SetTextCurrentDefaults(u"one\ntwo\nthree\nfour\nfive"_ustr);
+    pDocument->SetEditText(ScAddress(0, nRow, 0), rEngine.CreateTextObject());
+    ScDocShell* pDocSh = ScDocShell::GetViewData()->GetDocShell();
+    CPPUNIT_ASSERT(pDocSh);
+    CPPUNIT_ASSERT(pDocSh->AdjustRowHeight(nRow, nRow, 0));
+
+    setupViews();
+
+    switchToSheetView();
+    createNewSheetViewInCurrentView();
+    CPPUNIT_ASSERT_EQUAL(SCTAB(1), mpTabViewSheetView->GetViewData().GetTabNumber());
+    const sal_uInt16 nTallHeight = pDocument->GetRowHeight(nRow, 1);
+    CPPUNIT_ASSERT_EQUAL(pDocument->GetRowHeight(nRow, 0), nTallHeight);
+
+    // The header request records row position anchors for this area on the holder tab of the
+    // sheet view.
+    const tools::Long nRowOffsetTw = pDocument->GetRowHeight(0, nRow - 1, 1);
+    const tools::Rectangle aVisArea(0, nRowOffsetTw - 2000, 20000, nRowOffsetTw + 8000);
+    pModelObj->setClientVisibleArea(aVisArea);
+    {
+        tools::JsonWriter aJsonWriter;
+        pModelObj->getRowColumnHeaders(aVisArea, aJsonWriter);
+        aJsonWriter.finishAndGetAsOString();
+    }
+    Scheduler::ProcessEventsToIdle();
+
+    ScViewData& rSheetViewData = mpTabViewSheetView->GetViewData();
+    const double fPPTY = rSheetViewData.GetPPTY();
+    auto expectedRowPosition = [pDocument, fPPTY](SCROW nWhichRow) {
+        tools::Long nPixels = 0;
+        for (SCROW nR = 0; nR < nWhichRow; ++nR)
+            if (sal_uInt16 nSize = pDocument->GetRowHeight(nR, 1))
+                nPixels += ScViewData::ToPixel(nSize, fPPTY);
+        return nPixels;
+    };
+    CPPUNIT_ASSERT_EQUAL(expectedRowPosition(nRow + 8),
+                         rSheetViewData.GetScrPos(0, nRow + 8, rSheetViewData.GetActivePart()).Y());
+
+    // Clearing the multiline cell in the default view and recomputing the row height through
+    // the document shell, the way undo of a data entry does, shrinks the row on the default
+    // tab and invalidates the default tab positions in every view.
+    switchToDefaultView();
+    gotoCell(u"A9841");
+    dispatchCommand(mxComponent, u".uno:ClearContents"_ustr, {});
+    Scheduler::ProcessEventsToIdle();
+    CPPUNIT_ASSERT(pDocSh->AdjustRowHeight(nRow, nRow, 0));
+    CPPUNIT_ASSERT(pDocument->GetRowHeight(nRow, 0) < nTallHeight);
+    CPPUNIT_ASSERT_EQUAL(nTallHeight, pDocument->GetRowHeight(nRow, 1));
+
+    // The next syncing edit in the default view makes the holder table take over the shrunk
+    // row height.
+    moSheetView->m_sInvalidateSheetGeometry = ""_ostr;
+    gotoCell(u"A1");
+    dispatchCommand(mxComponent, u".uno:ClearContents"_ustr, {});
+    Scheduler::ProcessEventsToIdle();
+    CPPUNIT_ASSERT(pDocument->GetRowHeight(nRow, 1) < nTallHeight);
+
+    switchToSheetView();
+    CPPUNIT_ASSERT_EQUAL(expectedRowPosition(nRow + 8),
+                         rSheetViewData.GetScrPos(0, nRow + 8, rSheetViewData.GetActivePart()).Y());
+
+    // The client of the sheet view re-reads the geometry of its tab only when it is told that
+    // it changed.
+    CPPUNIT_ASSERT_EQUAL("all"_ostr, moSheetView->m_sInvalidateSheetGeometry);
 }
 
 CPPUNIT_PLUGIN_IMPLEMENT();

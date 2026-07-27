@@ -18,10 +18,12 @@
  */
 
 #include <utility>
+#include <comphelper/kit.hxx>
 #include <vcl/virdev.hxx>
 #include <svx/svdundo.hxx>
 
 #include <undobase.hxx>
+#include <docfuncutil.hxx>
 #include <refundo.hxx>
 #include <docsh.hxx>
 #include <tabvwsh.hxx>
@@ -189,6 +191,11 @@ void ScSimpleUndo::SyncSheetViews()
     ScDocument& rDocument = rDocShell.GetDocument();
     SCTAB nDefaultViewTable = rDocument.GetDefaultViewTableNumber(pViewData->GetTabNumber());
     rDocument.SyncSheetViews(nDefaultViewTable);
+    // Undo repaints only the base sheet, so the view sitting on a sheet view
+    // does not invalidate the part it shows through the normal paint path.
+    // Include that part so the current sheet view is refreshed too.
+    sc::DocFuncUtil::invalidateSheetViewTiles(rDocShell, nDefaultViewTable,
+                                              true /* bIncludeViewShownPart */);
 }
 
 void ScSimpleUndo::BroadcastChanges( const ScRange& rRange )
@@ -238,11 +245,25 @@ void ScSimpleUndo::BroadcastChanges( const DataSpansType& rSpans )
     }
 }
 
-void ScSimpleUndo::ShowTable( SCTAB nTab )
+void ScSimpleUndo::SetViewTabNo( SCTAB nTab )
 {
     ScTabViewShell* pViewShell = ScTabViewShell::GetActiveViewShell();
-    if (pViewShell)
-        pViewShell->SetTabNo( nTab );
+    if (!pViewShell)
+        return;
+
+    ScDocument& rDocument = pViewShell->GetViewData().GetDocument();
+    SCTAB nCurrentTab = pViewShell->GetViewData().GetTabNumber();
+    // A sheet view already shows the same change as its base sheet, so keep the
+    // view on the sheet view instead of pulling it onto the base sheet.
+    if (rDocument.GetDefaultViewTableNumber(nCurrentTab) == nTab)
+        return;
+
+    pViewShell->SetTabNo( nTab );
+}
+
+void ScSimpleUndo::ShowTable( SCTAB nTab )
+{
+    SetViewTabNo( nTab );
 }
 
 void ScSimpleUndo::ShowTable( const ScRange& rRange )
@@ -254,7 +275,7 @@ void ScSimpleUndo::ShowTable( const ScRange& rRange )
         SCTAB nEnd   = rRange.aEnd.Tab();
         SCTAB nTab = pViewShell->GetViewData().GetTabNumber();
         if ( nTab < nStart || nTab > nEnd )                     // if not in range:
-            pViewShell->SetTabNo( nStart );                     // at beginning of the range
+            SetViewTabNo( nStart );                             // at beginning of the range
     }
 }
 
@@ -341,6 +362,15 @@ bool ScBlockUndo::AdjustHeight()
 
     if (bRet)
     {
+        if (comphelper::COKit::isActive())
+        {
+            // The recomputed heights shift every row below the block, so the cached
+            // accumulated row positions from the first block row on are wrong.
+            ScTabViewShell::invalidateAllViewsKitPositions(
+                rDocShell.GetBestViewShell(false), /*bColumns=*/false,
+                aBlockRange.aStart.Tab(), aBlockRange.aStart.Row());
+        }
+
         // tdf#76183: recalculate objects' positions
         rDoc.SetDrawPageSize(aBlockRange.aStart.Tab());
 

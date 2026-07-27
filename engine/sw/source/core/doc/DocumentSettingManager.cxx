@@ -113,7 +113,8 @@ sw::DocumentSettingManager::DocumentSettingManager(SwDoc &rDoc)
     mbMsWordCompGridMetrics(false), // tdf#129808
     mbNoClippingWithWrapPolygon(false),
     mbBalanceSpacesAndIdeographicSpaces(false),
-    mbAdjustTableLineHeightsToGridHeight(true) // tdf#167583
+    mbAdjustTableLineHeightsToGridHeight(true), // tdf#167583
+    mbAssignConsecutiveLeftRightPages(false) // tdf#159133
 
     // COMPATIBILITY FLAGS END
 {
@@ -287,12 +288,15 @@ bool sw::DocumentSettingManager::get(/*[in]*/ DocumentSettingId id) const
         case DocumentSettingId::MS_WORD_COMP_GRID_METRICS: return mbMsWordCompGridMetrics;
         case DocumentSettingId::NO_CLIPPING_WITH_WRAP_POLYGON: return mbNoClippingWithWrapPolygon;
         case DocumentSettingId::MS_WORD_UL_TRAIL_SPACE: return mbMsWordUlTrailSpace;
+        case DocumentSettingId::LINE_SPACING_AS_GAP_BELOW: return mbLineSpacingAsGapBelow;
         case DocumentSettingId::BALANCE_SPACES_AND_IDEOGRAPHIC_SPACES:
             return mbBalanceSpacesAndIdeographicSpaces;
         case DocumentSettingId::FORCE_TOP_ALIGNMENT_IN_CELL_WITH_FLOATING_ANCHOR:
             return mbForceTopAlignmentInCellWithFloatingAnchor;
         case DocumentSettingId::ADJUST_TABLE_LINE_HEIGHTS_TO_GRID_HEIGHT:
             return mbAdjustTableLineHeightsToGridHeight;
+        case DocumentSettingId::ASSIGN_CONSECUTIVE_LEFT_RIGHT_PAGES:
+            return mbAssignConsecutiveLeftRightPages;
         default:
             OSL_FAIL("Invalid setting id");
     }
@@ -630,6 +634,9 @@ void sw::DocumentSettingManager::set(/*[in]*/ DocumentSettingId id, /*[in]*/ boo
         case DocumentSettingId::MS_WORD_UL_TRAIL_SPACE:
             mbMsWordUlTrailSpace = value;
             break;
+        case DocumentSettingId::LINE_SPACING_AS_GAP_BELOW:
+            mbLineSpacingAsGapBelow = value;
+            break;
         case DocumentSettingId::BALANCE_SPACES_AND_IDEOGRAPHIC_SPACES:
             mbBalanceSpacesAndIdeographicSpaces = value;
             break;
@@ -638,6 +645,9 @@ void sw::DocumentSettingManager::set(/*[in]*/ DocumentSettingId id, /*[in]*/ boo
             break;
         case DocumentSettingId::ADJUST_TABLE_LINE_HEIGHTS_TO_GRID_HEIGHT:
             mbAdjustTableLineHeightsToGridHeight = value;
+            break;
+        case DocumentSettingId::ASSIGN_CONSECUTIVE_LEFT_RIGHT_PAGES:
+            mbAssignConsecutiveLeftRightPages = value;
             break;
         default:
             OSL_FAIL("Invalid setting id");
@@ -773,12 +783,14 @@ void sw::DocumentSettingManager::ReplaceCompatibilityOptions(const DocumentSetti
     mbUseHiResolutionVirtualDevice = rSource.mbUseHiResolutionVirtualDevice;
     mbOldLineSpacing = rSource.mbOldLineSpacing;
     mbAddParaSpacingToTableCells = rSource.mbAddParaSpacingToTableCells;
+    // assume MISSING mApplyParagraphMarkFormatToNumbering = rSource.mApplyParagraphMarkFormatToNumbering;
     mbAddParaLineSpacingToTableCells = rSource.mbAddParaLineSpacingToTableCells;
     mbUseFormerObjectPos = rSource.mbUseFormerObjectPos;
     mbUseFormerTextWrapping = rSource.mbUseFormerTextWrapping;
     mbConsiderWrapOnObjPos = rSource.mbConsiderWrapOnObjPos;
     mbMathBaselineAlignment = rSource.mbMathBaselineAlignment;
     mbStylesNoDefault = rSource.mbStylesNoDefault;
+    // assume not compatibility settings: mEmbedFonts, mEmbedUsedFonts, mEmbedLatinScriptFonts, mEmbedAsianScriptFonts, mEmbedComplexScriptFonts, mEmbedSystemFonts
     mbOldNumbering = rSource.mbOldNumbering;
     mbIgnoreFirstLineIndentInNumbering = rSource.mbIgnoreFirstLineIndentInNumbering;
     mbNoGapAfterNoteNumber = rSource.mbNoGapAfterNoteNumber;
@@ -815,15 +827,32 @@ void sw::DocumentSettingManager::ReplaceCompatibilityOptions(const DocumentSetti
     // No mbProtectFields: this is false by default everywhere
     mbHeaderSpacingBelowLastPara = rSource.mbHeaderSpacingBelowLastPara;
     mbFrameAutowidthWithMorePara = rSource.mbFrameAutowidthWithMorePara;
+    // assume MISSING mbGutterAtTop = rSource.mbGutterAtTop;
+    // assume No mnImagePreferredDPI: not a compatibility setting
+    // assume No mbAutoFirstLineIndentDisregardLineSpace: this is true by default everywhere
+    // assume No mbHyphenateURLs: this is false by default everywhere
+    // assume MISSING mbDoNotBreakWrappedTables = rSource.mbDoNotBreakWrappedTables;
+    // assume MISSING mbAllowTextAfterFloatingTableBreak = rSource.mbAllowTextAfterFloatingTableBreak;
+    // assume MISSING mbJustifyLinesWithShrinking = rSource.mbJustifyLinesWithShrinking;
+    // assume No mbApplyTextAttrToEmptyLineAtEndOfParagraph: this is false by default everywhere
+    // assume MISSING mbApplyParagraphMarkFormatToEmptyLineAtEndOfParagraph = rSource.mbApplyParagraphMarkFormatToEmptyLineAtEndOfParagraph;
+    // assume MISSING mbHiddenParagraphMarkPerLineProperties = rSource.mbHiddenParagraphMarkPerLineProperties;
+    // assume No mbIgnoreHiddenCharsForLineCalculation: this is true by default everywhere
+    // assume MISSING mbDoNotMirrorRtlDrawObjs = rSource.mbDoNotMirrorRtlDrawObjs;
+    // assume MISSING mbNoNumberingShowFollowBy = rSource.mbNoNumberingShowFollowBy;
     mbFootnoteInColumnToPageEnd = rSource.mbFootnoteInColumnToPageEnd;
     mbDropCapPunctuation = rSource.mbDropCapPunctuation;
     mbUseVariableWidthNBSP = rSource.mbUseVariableWidthNBSP;
+    // assume MISSING mbPaintHellOverHeaderFooter = rSource.mbPaintHellOverHeaderFooter;
+    // assume MISSING mbMinRowHeightInclBorder = rSource.mbMinRowHeightInclBorder;
     mbMsWordCompGridMetrics = rSource.mbMsWordCompGridMetrics;
     mbNoClippingWithWrapPolygon = rSource.mbNoClippingWithWrapPolygon;
     mbMsWordUlTrailSpace = rSource.mbMsWordUlTrailSpace;
+    mbLineSpacingAsGapBelow = rSource.mbLineSpacingAsGapBelow;
     mbBalanceSpacesAndIdeographicSpaces = rSource.mbBalanceSpacesAndIdeographicSpaces;
     mbForceTopAlignmentInCellWithFloatingAnchor = rSource.mbForceTopAlignmentInCellWithFloatingAnchor;
     mbAdjustTableLineHeightsToGridHeight = rSource.mbAdjustTableLineHeightsToGridHeight;
+    mbAssignConsecutiveLeftRightPages = rSource.mbAssignConsecutiveLeftRightPages;
 }
 
 sal_uInt32 sw::DocumentSettingManager::Getn32DummyCompatibilityOptions1() const
@@ -1230,6 +1259,11 @@ void sw::DocumentSettingManager::dumpAsXml(xmlTextWriterPtr pWriter) const
                                 BAD_CAST(OString::boolean(mbMsWordUlTrailSpace).getStr()));
     (void)xmlTextWriterEndElement(pWriter);
 
+    (void)xmlTextWriterStartElement(pWriter, BAD_CAST("mbLineSpacingAsGapBelow"));
+    (void)xmlTextWriterWriteAttribute(pWriter, BAD_CAST("value"),
+                                BAD_CAST(OString::boolean(mbLineSpacingAsGapBelow).getStr()));
+    (void)xmlTextWriterEndElement(pWriter);
+
     (void)xmlTextWriterStartElement(pWriter, BAD_CAST("mbBalanceSpacesAndIdeographicSpaces"));
     (void)xmlTextWriterWriteAttribute(
         pWriter, BAD_CAST("value"),
@@ -1248,6 +1282,12 @@ void sw::DocumentSettingManager::dumpAsXml(xmlTextWriterPtr pWriter) const
         pWriter, BAD_CAST("value"),
         BAD_CAST(OString::boolean(mbAdjustTableLineHeightsToGridHeight).getStr()));
     (void)xmlTextWriterEndElement(pWriter);
+
+    (void)xmlTextWriterStartElement(pWriter, BAD_CAST("mbAssignConsecutiveLeftRightPages"));
+    (void)xmlTextWriterWriteAttribute(pWriter, BAD_CAST("value"),
+                                BAD_CAST(OString::boolean(mbAssignConsecutiveLeftRightPages).getStr()));
+    (void)xmlTextWriterEndElement(pWriter);
+
 
     (void)xmlTextWriterEndElement(pWriter);
 }
