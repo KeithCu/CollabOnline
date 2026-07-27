@@ -27,7 +27,7 @@
 #include <com/sun/star/sheet/XVolatileResult.hpp>
 #include <org/collaboraoffice/sheet/addin/XPythonComputeFunctions.hpp>
 #include <com/sun/star/uno/Reference.hxx>
-#include <com/sun/star/uno/TypeClass.hpp>
+#include <cpo/uno/TypeClass.hpp>
 #include <com/sun/star/uno/XInterface.hpp>
 
 #include <comphelper/processfactory.hxx>
@@ -198,7 +198,7 @@ CPPUNIT_TEST_FIXTURE(Test, test_noEmitterUnavailable)
     CPPUNIT_ASSERT_EQUAL(sal_Int32(1), xLis->count());
 
     // void Any → #N/A in ScUnoAddInCall::SetResult
-    CPPUNIT_ASSERT_EQUAL(uno::TypeClass_VOID, xLis->last().getValueTypeClass());
+    CPPUNIT_ASSERT_EQUAL(cpo::uno::TypeClass_VOID, xLis->last().getValueTypeClass());
 }
 
 CPPUNIT_TEST_FIXTURE(Test, test_emitterCompleteRoundTrip)
@@ -305,7 +305,7 @@ CPPUNIT_TEST_FIXTURE(Test, test_pendingTimeoutWithoutRecalc)
     }
 
     CPPUNIT_ASSERT_EQUAL(sal_Int32(2), xLis->count());
-    CPPUNIT_ASSERT_EQUAL(uno::TypeClass_VOID, xLis->last().getValueTypeClass());
+    CPPUNIT_ASSERT_EQUAL(cpo::uno::TypeClass_VOID, xLis->last().getValueTypeClass());
 
     const OString aIdUtf8 = OUStringToOString(sId, RTL_TEXTENCODING_UTF8);
     const std::string lateComplete

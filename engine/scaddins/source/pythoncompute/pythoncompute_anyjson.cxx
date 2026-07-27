@@ -20,7 +20,6 @@
 #include "pythoncompute_anyjson.hxx"
 
 #include <cpo/uno/Type.hxx>
-#include <com/sun/star/uno/TypeClass.hpp>
 #include <rtl/math.hxx>
 #include <rtl/ustrbuf.hxx>
 #include <rtl/ustring.hxx>
@@ -34,7 +33,6 @@
 #include <utility>
 #include <vector>
 
-using namespace css;
 using namespace collaboraoffice::pythoncompute;
 
 cpo::uno::Any collaboraoffice::pythoncompute::makeFormulaErrorAny(FormulaError e)
@@ -224,39 +222,39 @@ void writeAnyElement(tools::JsonWriter& rWriter, const cpo::uno::Any& aValue)
 
     switch (aValue.getValueTypeClass())
     {
-        case uno::TypeClass_VOID:
+        case cpo::uno::TypeClass_VOID:
             rWriter.putRaw("null");
             return;
-        case uno::TypeClass_BOOLEAN:
+        case cpo::uno::TypeClass_BOOLEAN:
         {
             bool b = false;
             aValue >>= b;
             rWriter.putRaw(b ? "true" : "false");
             return;
         }
-        case uno::TypeClass_BYTE:
-        case uno::TypeClass_SHORT:
-        case uno::TypeClass_UNSIGNED_SHORT:
-        case uno::TypeClass_LONG:
-        case uno::TypeClass_UNSIGNED_LONG:
-        case uno::TypeClass_HYPER:
-        case uno::TypeClass_UNSIGNED_HYPER:
-        case uno::TypeClass_FLOAT:
-        case uno::TypeClass_DOUBLE:
+        case cpo::uno::TypeClass_BYTE:
+        case cpo::uno::TypeClass_SHORT:
+        case cpo::uno::TypeClass_UNSIGNED_SHORT:
+        case cpo::uno::TypeClass_LONG:
+        case cpo::uno::TypeClass_UNSIGNED_LONG:
+        case cpo::uno::TypeClass_HYPER:
+        case cpo::uno::TypeClass_UNSIGNED_HYPER:
+        case cpo::uno::TypeClass_FLOAT:
+        case cpo::uno::TypeClass_DOUBLE:
         {
             double f = 0.0;
             aValue >>= f;
             writeNumberElement(rWriter, f);
             return;
         }
-        case uno::TypeClass_STRING:
+        case cpo::uno::TypeClass_STRING:
         {
             OUString s;
             aValue >>= s;
             rWriter.putSimpleValue(s);
             return;
         }
-        case uno::TypeClass_SEQUENCE:
+        case cpo::uno::TypeClass_SEQUENCE:
         {
             // Calc ranges arrive as Sequence<Sequence<Any>> — try grids first.
             // Sequence<Any> is a distinct UNO type and must not gate grids.
@@ -322,39 +320,39 @@ void writeAnyProperty(tools::JsonWriter& rWriter, std::string_view sName,
 
     switch (aValue.getValueTypeClass())
     {
-        case uno::TypeClass_VOID:
+        case cpo::uno::TypeClass_VOID:
             putNamedNull();
             return;
-        case uno::TypeClass_BOOLEAN:
+        case cpo::uno::TypeClass_BOOLEAN:
         {
             bool b = false;
             aValue >>= b;
             rWriter.put(sName, b);
             return;
         }
-        case uno::TypeClass_BYTE:
-        case uno::TypeClass_SHORT:
-        case uno::TypeClass_UNSIGNED_SHORT:
-        case uno::TypeClass_LONG:
-        case uno::TypeClass_UNSIGNED_LONG:
-        case uno::TypeClass_HYPER:
-        case uno::TypeClass_UNSIGNED_HYPER:
-        case uno::TypeClass_FLOAT:
-        case uno::TypeClass_DOUBLE:
+        case cpo::uno::TypeClass_BYTE:
+        case cpo::uno::TypeClass_SHORT:
+        case cpo::uno::TypeClass_UNSIGNED_SHORT:
+        case cpo::uno::TypeClass_LONG:
+        case cpo::uno::TypeClass_UNSIGNED_LONG:
+        case cpo::uno::TypeClass_HYPER:
+        case cpo::uno::TypeClass_UNSIGNED_HYPER:
+        case cpo::uno::TypeClass_FLOAT:
+        case cpo::uno::TypeClass_DOUBLE:
         {
             double f = 0.0;
             aValue >>= f;
             writeNumberProperty(rWriter, sName, f);
             return;
         }
-        case uno::TypeClass_STRING:
+        case cpo::uno::TypeClass_STRING:
         {
             OUString s;
             aValue >>= s;
             rWriter.put(sName, s);
             return;
         }
-        case uno::TypeClass_SEQUENCE:
+        case cpo::uno::TypeClass_SEQUENCE:
         {
             // Named array field: "name": [ … ] — grids before Sequence<Any>.
             cpo::uno::Sequence<cpo::uno::Sequence<cpo::uno::Any>> aGrid;
@@ -622,9 +620,9 @@ bool promoteFlatNumeric(const cpo::uno::Sequence<cpo::uno::Any>& aFlat, cpo::uno
         return false;
     for (sal_Int32 i = 0; i < aFlat.getLength(); ++i)
     {
-        const uno::TypeClass e = aFlat[i].getValueTypeClass();
-        if (e != uno::TypeClass_DOUBLE && e != uno::TypeClass_LONG && e != uno::TypeClass_HYPER
-            && e != uno::TypeClass_FLOAT)
+        const cpo::uno::TypeClass e = aFlat[i].getValueTypeClass();
+        if (e != cpo::uno::TypeClass_DOUBLE && e != cpo::uno::TypeClass_LONG
+            && e != cpo::uno::TypeClass_HYPER && e != cpo::uno::TypeClass_FLOAT)
             return false;
     }
     cpo::uno::Sequence<cpo::uno::Sequence<double>> row(1);
@@ -741,7 +739,7 @@ bool elemsToAny(std::vector<cpo::uno::Any> elems, cpo::uno::Any& rOut)
     // rows were ragged or otherwise not representable as one Calc matrix.
     for (const auto& e : elems)
     {
-        if (e.getValueTypeClass() == uno::TypeClass_SEQUENCE)
+        if (e.getValueTypeClass() == cpo::uno::TypeClass_SEQUENCE)
             return false;
     }
 
@@ -763,9 +761,9 @@ bool elemsToAny(std::vector<cpo::uno::Any> elems, cpo::uno::Any& rOut)
     {
         // Keep a one-element JSON list as a 1×1 matrix for every scalar type.
         // Bare JSON scalar values still use the leaf path in parseValue().
-        const uno::TypeClass e = flat[0].getValueTypeClass();
-        if (e == uno::TypeClass_DOUBLE || e == uno::TypeClass_LONG || e == uno::TypeClass_HYPER
-            || e == uno::TypeClass_FLOAT)
+        const cpo::uno::TypeClass e = flat[0].getValueTypeClass();
+        if (e == cpo::uno::TypeClass_DOUBLE || e == cpo::uno::TypeClass_LONG
+            || e == cpo::uno::TypeClass_HYPER || e == cpo::uno::TypeClass_FLOAT)
         {
             double f = 0;
             flat[0] >>= f;
@@ -1049,10 +1047,11 @@ bool collaboraoffice::pythoncompute::jsonResultToAny(std::string_view jsonUtf8, 
     // images[] only — Classic inserts plots; Online v1: short message
     const cpo::uno::Any& aResult = *env.result;
     const bool bResultNull
-        = !aResult.hasValue() || (aResult.getValueTypeClass() == uno::TypeClass_STRING && [&]() {
-              OUString s;
-              return (aResult >>= s) && s.isEmpty();
-          }());
+        = !aResult.hasValue()
+          || (aResult.getValueTypeClass() == cpo::uno::TypeClass_STRING && [&]() {
+                 OUString s;
+                 return (aResult >>= s) && s.isEmpty();
+             }());
     // JSON null maps to empty OUString above; treat that as null result.
     if (env.hasImages && bResultNull)
     {
