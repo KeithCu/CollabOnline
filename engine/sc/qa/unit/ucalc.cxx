@@ -3199,6 +3199,12 @@ CPPUNIT_TEST_FIXTURE(Test, testFunctionLists)
         nullptr
     };
 
+    const char* aAddIn[] = {
+        "PY",
+        "PYTHON",
+        nullptr
+    };
+
     struct {
         const char* Category; const char** Functions;
     } aTests[] = {
@@ -3212,7 +3218,7 @@ CPPUNIT_TEST_FIXTURE(Test, testFunctionLists)
         { "Statistical",  aStatistical },
         { "Spreadsheet",  aSpreadsheet },
         { "Text",         aText },
-        { "Add-in",       nullptr },
+        { "Add-in",       aAddIn },
         { nullptr, nullptr }
     };
 

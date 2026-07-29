@@ -156,6 +156,7 @@ fuzzer_calc_libraries = \
     analysis \
     date \
     pricing \
+    $(call gb_Helper_optional,PYTHON_COMPUTE,pythoncompute) \
     scfilt \
     scd \
     $(call gb_Helper_optional,SCRIPTING, \

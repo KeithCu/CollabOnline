@@ -112,6 +112,7 @@ $(eval $(call gb_CppunitTest_use_components,sc_ucalc$(1),\
     scaddins/source/analysis/analysis \
     scaddins/source/datefunc/date \
     scaddins/source/pricing/pricing \
+    $(call gb_Helper_optional,PYTHON_COMPUTE,scaddins/source/pythoncompute/pythoncompute) \
     sfx2/util/sfx \
     ucb/source/core/ucb1 \
     ucb/source/ucp/file/ucpfile1 \

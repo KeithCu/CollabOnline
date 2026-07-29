@@ -29,4 +29,9 @@ $(eval $(call gb_InternalUnoApi_add_idlfiles,scaddins,com/sun/star/sheet/addin,\
     XMiscFunctions \
 ))
 
+$(eval $(call gb_InternalUnoApi_add_idlfiles,scaddins,org/collaboraoffice/sheet/addin,\
+    PythonComputeFunctions \
+    XPythonComputeFunctions \
+))
+
 # vim:set noet sw=4 ts=4:
