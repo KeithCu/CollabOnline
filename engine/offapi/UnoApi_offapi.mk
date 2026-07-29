@@ -897,7 +897,6 @@ $(eval $(call gb_UnoApi_add_idlfiles_noheader,offapi,com/sun/star/gallery,\
 $(eval $(call gb_UnoApi_add_idlfiles_noheader,offapi,com/sun/star/graphic,\
 	Graphic \
 	GraphicDescriptor \
-	GraphicRasterizer \
 	GraphicRendererVCL \
 	MediaProperties \
 ))
@@ -1517,7 +1516,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/accessibility,\
 	AccessibleTextType \
 	IllegalAccessibleComponentStateException \
 	TextSegment \
-    MSAAService \
 	XAccessible \
 	XAccessibleAction \
 	XAccessibleComponent \
@@ -1544,7 +1542,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/accessibility,\
 	XAccessibleTextMarkup \
     XAccessibleTextSelection \
 	XAccessibleValue \
-    XMSAAService \
 ))
 $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/animations,\
 	AnimationAdditiveMode \
@@ -2547,7 +2544,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/graphic,\
 	XGraphicObject \
 	XGraphicProvider \
 	XGraphicProvider2 \
-	XGraphicRasterizer \
 	XGraphicRenderer \
 	XGraphicTransformer \
 	XGraphicMapper \
@@ -2835,30 +2831,15 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/rdf,\
 ))
 $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/rendering,\
 	ARGBColor \
-	BlendMode \
-	Caret \
 	Color \
 	ColorComponent \
-	ColorComponentTag \
-	ColorProfile \
-	CompositeOperation \
-	EmphasisMark \
 	FillRule \
 	FontInfo \
-	FontMetrics \
 	FontRequest \
-	InterpolationMode \
 	Panose \
-	PanoseArmStyle \
-	PanoseContrast \
-	PanoseFamilyTypes \
 	PanoseLetterForm \
-	PanoseMidline \
 	PanoseProportion \
-	PanoseSerifStyle \
-	PanoseStrokeVariation \
 	PanoseWeight \
-	PanoseXHeight \
 	PathCapType \
 	PathJoinType \
 	RGBColor \
@@ -2870,7 +2851,6 @@ $(eval $(call gb_UnoApi_add_idlfiles,offapi,com/sun/star/rendering,\
 	Texture \
 	TexturingMode \
 	ViewState \
-	VolatileContentDestroyedException \
 	XBezierPolyPolygon2D \
 	XBitmap \
 	XCachedPrimitive \

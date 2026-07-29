@@ -31,19 +31,12 @@ endif
 ifneq ($(ENABLE_WASM_STRIP_CANVAS),TRUE)
 $(eval $(call gb_Module_add_moduledirs,libreoffice,\
 	canvas \
-	cppcanvas \
 ))
 endif
 
 ifneq ($(ENABLE_WASM_STRIP_DBACCESS),TRUE)
 $(eval $(call gb_Module_add_moduledirs,libreoffice,\
 	$(call gb_Helper_optional,DBCONNECTIVITY,dbaccess) \
-))
-endif
-
-ifneq ($(ENABLE_WASM_STRIP_ACCESSIBILITY),TRUE)
-$(eval $(call gb_Module_add_moduledirs,libreoffice,\
-	winaccessibility \
 ))
 endif
 

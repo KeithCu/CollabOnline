@@ -12,7 +12,7 @@
  * window.L.Control.PartsPreview
  */
 
-/* global _ app $ Hammer _UNO cool JSDialog */
+/* global _ app $ Hammer _UNO cool JSDialog buildSlideDragGhost */
 window.L.Control.PartsPreview = window.L.Control.extend({
 	options: {
 		fetchThumbnail: true,
@@ -49,9 +49,6 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 		this._menuPosEl = null;
 		this.partsFocusedApplied = false;
 		this._dragState = null;
-		// Part hashes of the preview requests that are under way, keyed by
-		// the part index the request was made with.
-		this._pendingPreviewHashes = {};
 
 		// A click clears the slide sorter focus mode, unless that same click
 		// re-focused a preview.
@@ -66,6 +63,7 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 
 	onAdd: function (map) {
 		this._previewInitialized = false;
+		this._gridMode = false;
 		this._previewTiles = [];
 		this._sectionHeaders = []; // Section header DOM elements
 		this._collapsedSections = new Set(); // Names of sections collapsed by the user
@@ -266,6 +264,9 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 		img.setAttribute('tabindex', '-1');
 		window.L.control.attachTooltipEventListener(img, this._map);
 		img.id = 'preview-img-part-' + this._idNum;
+		// The unique id of the slide this preview shows. The slide list
+		// carries that id under its legacy name, hash, and this property
+		// keeps the name it is seeded from.
 		img.hash = hashCode;
 		img.src = document.querySelector('meta[name="previewSmile"]').content;
 		img.fetched = false;
@@ -724,6 +725,22 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 			that._selectSection(sectionIndex);
 		}, this);
 
+		// The second press of a double-click on the header (but not on the toggle) opens
+		// the rename dialog.
+		if (this._map.isEditMode()) {
+			window.L.DomEvent.on(header, 'mousedown', function (e) {
+				if (e.detail !== 2 || e.button !== 0 || toggleBtn.contains(e.target))
+					return;
+				window.L.DomEvent.stopPropagation(e);
+				window.L.DomEvent.preventDefault(e);
+
+				if (app.map.isReadOnlyMode())
+					return;
+
+				that._renameSection(section, sectionIndex);
+			}, this);
+		}
+
 		// Section context menu
 		if (this._map.isEditMode()) {
 			window.L.DomEvent.on(header, 'contextmenu', function(e) {
@@ -735,43 +752,6 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 
 				that._openSectionContextMenu(section, sectionIndex, e);
 			}, this);
-		}
-
-		// Drop target: dropping a slide onto a section header makes it the
-		// new first slide of that section.  Dropping above the header (on
-		// the preceding slide frame) keeps the default behaviour of placing
-		// the slide outside the section.
-		if (!app.file.fileBasedView) {
-			header.addEventListener('dragenter', function (e) {
-				if (e.preventDefault) e.preventDefault();
-			});
-			header.addEventListener('dragover', function (e) {
-				if (e.preventDefault) e.preventDefault();
-				e.dataTransfer.dropEffect = 'move';
-				header.classList.add('slide-section-dropsite');
-				return false;
-			});
-			header.addEventListener('dragleave', function () {
-				header.classList.remove('slide-section-dropsite');
-			});
-			header.addEventListener('drop', function (e) {
-				if (e.stopPropagation) e.stopPropagation();
-				if (e.preventDefault) e.preventDefault();
-				header.classList.remove('slide-section-dropsite');
-				var startIndex = section.startIndex;
-				var position = startIndex > 0 ? startIndex - 1 : -1;
-				app.socket.sendMessage(
-					'moveselectedclientparts position=' + position +
-					' intoSection=' + sectionIndex);
-				// The dropped slides become the first slides of the section:
-				// settle them locally in front of its current first slide.
-				const state = that._dragState;
-				if (state) {
-					that._applyDropLocally(startIndex, state.draggedParts, true);
-					that._finishDrag(false);
-				}
-				return false;
-			});
 		}
 
 		return header;
@@ -1092,8 +1072,10 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 			if (child === element || child === element.parentNode) {
 				return frameIndex;
 			}
-			// Only count non-section-header children as frames
-			if (!child.classList.contains('slide-section-header'))
+			// Only count slide frames: not section headers, and not the
+			// drop-gap cell a grid drag keeps in the flow.
+			if (!child.classList.contains('slide-section-header') &&
+			    !child.classList.contains('drop-gap-cell'))
 				frameIndex++;
 		}
 		return -1;
@@ -1386,12 +1368,39 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 		this._width = window.innerWidth;
 	},
 
+	// Switch the slide list between the narrow vertical strip and a wide
+	// grid. The grid shows bigger thumbnails, so the previews are re-fetched
+	// at a larger size to stay crisp.
+	setGridMode: function (enabled) {
+		enabled = !!enabled;
+		if (this._gridMode === enabled)
+			return;
+		this._gridMode = enabled;
+
+		var wrapper = window.L.DomUtil.get('presentation-controls-wrapper');
+		if (wrapper) {
+			if (enabled)
+				window.L.DomUtil.addClass(wrapper, 'parts-preview-grid');
+			else
+				window.L.DomUtil.removeClass(wrapper, 'parts-preview-grid');
+			// The wrapper shows and hides through its inline display value, so
+			// the layout change writes that same value: 'flex' stacks the
+			// slide list and the toolbar as a column for the grid, 'block' is
+			// the plain flow of the strip. A hidden wrapper stays hidden.
+			if (wrapper.style.display !== 'none')
+				wrapper.style.display = enabled ? 'flex' : 'block';
+		}
+
+		var listSize = window.mode.isDesktop() ? 180 : (window.mode.isTablet() ? 120 : 60);
+		this.options.maxWidth = enabled ? 256 : listSize;
+		this.options.maxHeight = this.options.maxWidth;
+
+		if (this._previewInitialized)
+			this._invalidateParts();
+	},
+
 	_beforeRequestPreview: function (e) {
 		if (e.part !== undefined && e.part >= 0 && e.part < this._previewTiles.length) {
-			// The response comes back carrying this part index; the hash
-			// remembers which slide that index held when the request went
-			// out, in case the previews get reordered in the meantime.
-			this._pendingPreviewHashes[e.part] = this._previewTiles[e.part].hash;
 			if (this._previewTiles[e.part].src === document.querySelector('meta[name="previewSmile"]').content)
 				this._previewTiles[e.part].src = document.querySelector('meta[name="previewImg"]').content;
 		}
@@ -1407,23 +1416,19 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 			this._map._processPreviewQueue();
 			if (!this._previewInitialized)
 				return;
-			const partId = parseInt(e.id);
-			let tile = this._previewTiles[partId];
-			const requestHash = this._pendingPreviewHashes[partId];
-			delete this._pendingPreviewHashes[partId];
-			if (requestHash && (!tile || tile.hash !== requestHash)) {
-				// The previews were reordered while the request was under
-				// way; the image belongs to the slide that held this index
-				// when the request went out. Without that slide the image
-				// has no preview to go to.
-				tile = this._previewTiles.find(function (candidate) {
-					return candidate.hash === requestHash;
-				});
-			}
+			if (e.uniqueId === undefined)
+				return;
+			// The response names the slide it rendered, so the image lands on
+			// that slide wherever it now sits, even if the parts were
+			// renumbered while the request was under way. A slide deleted in
+			// the meantime has no preview left, so its image is dropped.
+			const tile = this._previewTiles.find(function (candidate) {
+				return candidate.hash === e.uniqueId;
+			});
 			if (tile) {
 				tile.src = e.tile.src;
 				tile.fetched = true;
-				window.app.console.debug('PREVIEW: part fetched : ' + partId);
+				window.app.console.debug('PREVIEW: part fetched : ' + parseInt(e.id));
 			}
 		}
 	},
@@ -1594,7 +1599,6 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 
 	_handleTouchCancel: function(e) {
 		$('.preview-frame').removeClass('preview-img-dropsite');
-		$('.slide-section-dropsite').removeClass('slide-section-dropsite');
 		$(this.draggedSlide).remove();
 		this._removeDnDTouchHandlers(e);
 	},
@@ -1613,7 +1617,6 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 			}
 		}
 		$('.preview-frame').removeClass('preview-img-dropsite');
-		$('.slide-section-dropsite').removeClass('slide-section-dropsite');
 		$(this.draggedSlide).remove();
 		this._removeDnDTouchHandlers(e);
 		return false;
@@ -1647,28 +1650,34 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 		// By default we move when dragging, but can
 		// support duplication with ctrl in the future.
 		e.dataTransfer.effectAllowed = 'move';
+		// The drag carries only the custom type. A drag that starts on the
+		// preview picture is a native image drag, which the browser preloads
+		// with the picture's URL as text and HTML; clearing that keeps a drop
+		// on a text input or another application from pasting the preview
+		// data there.
+		e.dataTransfer.clearData();
 		e.dataTransfer.setData('application/x-cool-slide', String(partId));
 
-		// The drag ghost is the slide picture at its on-screen size with
-		// the standard preview border, held at the grab point.
+		partsPreview._beginDrag(partId, alreadySelected);
+
+		// The drag ghost is the grabbed slide's picture at its on-screen
+		// size with the standard preview border, held at the grab point;
+		// the other dragged slides stack behind it and a badge counts them.
 		const img = partsPreview._previewTiles[partId];
 		if (img && e.dataTransfer.setDragImage) {
 			const rect = img.getBoundingClientRect();
-			const ghost = document.createElement('div');
-			ghost.className = 'slide-drag-ghost';
-			const ghostImg = document.createElement('img');
-			ghostImg.src = img.src;
-			ghostImg.style.width = rect.width + 'px';
-			ghostImg.style.height = rect.height + 'px';
-			ghost.appendChild(ghostImg);
+			const draggedParts = partsPreview._dragState.draggedParts;
+			const sources = [partId]
+				.concat(draggedParts.filter(function (part) { return part !== partId; }))
+				.map(function (part) { return partsPreview._previewTiles[part].src; });
+			const ghost = buildSlideDragGhost(sources, rect.width, rect.height,
+				draggedParts.length);
 			document.body.appendChild(ghost);
 			e.dataTransfer.setDragImage(ghost, e.clientX - rect.left, e.clientY - rect.top);
 			// The snapshot is taken when the dragstart handler returns;
 			// the ghost element itself is no longer needed after that.
 			setTimeout(function () { ghost.remove(); }, 0);
 		}
-
-		partsPreview._beginDrag(partId, alreadySelected);
 	},
 
 	// Collect the slides taking part in the drag and start the drag
@@ -1698,16 +1707,23 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 			sizes.push(size);
 			gapSize += size;
 		}
+		// In the grid layout the gap is one empty cell, so it takes a
+		// single slide's height rather than the dragged frames' sum.
+		if (this._gridMode && sizes.length)
+			gapSize = sizes[0];
 
 		this._dragState = {
 			draggedParts: draggedParts,
 			frames: frames,
 			sizes: sizes,
 			sizeProperty: sizeProperty,
+			grid: this._gridMode,
 			gapSize: gapSize,
 			gapFrame: null,
 			gapSide: null,
+			gapPlaceholder: null,
 			insertIndex: null,
+			intoSection: null,
 			pointer: null,
 			autoScrollId: null
 		};
@@ -1721,6 +1737,17 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 		setTimeout(() => {
 			if (this._dragState !== state)
 				return;
+			// A grid frame keeps occupying its cell at zero size, so in the
+			// grid the dragged frames leave the flow entirely and the
+			// remaining slides slide into the freed cells.
+			if (state.grid) {
+				this._animateGridChange(function () {
+					for (let i = 0; i < frames.length; i++)
+						frames[i].style.display = 'none';
+				});
+				this._schedulePreviewRefresh();
+				return;
+			}
 			for (let i = 0; i < frames.length; i++) {
 				frames[i].style.boxSizing = 'border-box';
 				frames[i].style[sizeProperty] = sizes[i] + 'px';
@@ -1763,16 +1790,6 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 			return;
 		}
 
-		// Over a section header the header itself is the drop target and
-		// shows its own highlight, so no insertion gap. Clearing the
-		// pointer also pauses the edge auto-scroll.
-		if (e.target && e.target.closest && e.target.closest('.slide-section-header')) {
-			this._removeDropGap(state);
-			state.insertIndex = null;
-			state.pointer = null;
-			return;
-		}
-
 		e.preventDefault();
 		if (e.dataTransfer)
 			e.dataTransfer.dropEffect = 'move';
@@ -1800,7 +1817,7 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 		if (e.clientX >= rect.left && e.clientX < rect.right &&
 		    e.clientY >= rect.top && e.clientY < rect.bottom)
 			return;
-		this._removeDropGap(state);
+		this._closeDropGap(state);
 		state.insertIndex = null;
 		state.pointer = null;
 	},
@@ -1821,11 +1838,107 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 		}
 
 		// Insert after the slide preceding the gap; -1 inserts before the
-		// first slide.
-		app.socket.sendMessage('moveselectedclientparts position=' + (insertIndex - 1));
+		// first slide. On a section boundary intoSection names the section
+		// whose first slides the dropped slides become; without it they
+		// land above the section, outside it.
+		let message = 'moveselectedclientparts position=' + (insertIndex - 1);
+		if (state.intoSection !== null)
+			message += ' intoSection=' + state.intoSection;
+		app.socket.sendMessage(message);
 
-		this._applyDropLocally(insertIndex, state.draggedParts);
+		this._applyDropLocally(insertIndex, state.draggedParts,
+			state.intoSection !== null);
 		this._finishDrag(false);
+	},
+
+	// Slide the sorter's children from where they are into the places a
+	// layout change gives them. The grid re-places whole cells in one
+	// step, so each moved child briefly keeps its old position as a
+	// transform and then slides from there into its new cell. mutate()
+	// applies the layout change.
+	_animateGridChange: function (mutate) {
+		if (window.matchMedia &&
+		    window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			mutate();
+			return;
+		}
+
+		const container = this._partsPreviewCont;
+		const children = Array.prototype.slice.call(container.children);
+		const before = new Map();
+		for (let i = 0; i < children.length; i++) {
+			const el = children[i];
+			// A change arriving mid-slide starts from the spot the child
+			// has reached: the rect includes the running transform, which
+			// then resets so the new layout measures clean.
+			before.set(el, el.getBoundingClientRect());
+			if (el._gridSlideTimer) {
+				clearTimeout(el._gridSlideTimer);
+				el._gridSlideTimer = null;
+			}
+			el.style.transition = '';
+			el.style.transform = '';
+		}
+
+		mutate();
+
+		const moved = [];
+		for (let i = 0; i < container.children.length; i++) {
+			const el = container.children[i];
+			const from = before.get(el);
+			if (!from || (!from.width && !from.height))
+				continue;
+			const to = el.getBoundingClientRect();
+			if (!to.width && !to.height)
+				continue;
+			const deltaX = from.left - to.left;
+			const deltaY = from.top - to.top;
+			if (!deltaX && !deltaY)
+				continue;
+			el.style.transition = 'none';
+			el.style.transform =
+				'translate(' + deltaX + 'px, ' + deltaY + 'px)';
+			moved.push(el);
+		}
+		if (!moved.length)
+			return;
+
+		// With the old positions frozen in as transforms, releasing them
+		// after a reflow slides each child into its new cell.
+		void container.offsetHeight;
+		for (let i = 0; i < moved.length; i++) {
+			const el = moved[i];
+			el.style.transition = 'transform 0.15s ease-out';
+			el.style.transform = '';
+			el._gridSlideTimer = setTimeout(() => {
+				el.style.transition = '';
+				el._gridSlideTimer = null;
+			}, 200);
+		}
+	},
+
+	// Close the insertion gap; in the grid the surrounding slides move
+	// back into the freed cells.
+	_closeDropGap: function (state) {
+		if (!state.gapFrame)
+			return;
+		if (state.grid)
+			this._animateGridChange(() => this._removeDropGap(state));
+		else
+			this._removeDropGap(state);
+	},
+
+	// The header of the section whose first slide sits at the given slide
+	// index, or null when no section starts there.
+	_sectionHeaderAt: function (slideIndex) {
+		const sections = (app.impress && app.impress.sections) || [];
+		for (let h = 0; h < this._sectionHeaders.length; h++) {
+			const header = this._sectionHeaders[h];
+			const s = parseInt(header.getAttribute('data-section-index'), 10);
+			if (sections[s] && sections[s].startIndex === slideIndex)
+				return header;
+		}
+		return null;
 	},
 
 	// Choose the insertion point from the pointer position and open a
@@ -1838,6 +1951,7 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 			return;
 
 		const horizontal = this._direction === 'x';
+		const rtl = document.documentElement.dir === 'rtl';
 		const pointerPosition = horizontal ? state.pointer.x : state.pointer.y;
 
 		let insertIndex = this._previewTiles.length;
@@ -1851,8 +1965,22 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 			if (frame.classList.contains('section-collapsed'))
 				continue;
 			const rect = frame.getBoundingClientRect();
-			const middle = horizontal ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
-			if (pointerPosition < middle) {
+			let pointerBefore;
+			if (state.grid) {
+				// The grid flows in reading order: the pointer comes before
+				// a frame when it is above the frame's row, or in the same
+				// row on the near side of the frame's middle.
+				const middleX = rect.left + rect.width / 2;
+				const beforeInRow = rtl ?
+					state.pointer.x > middleX : state.pointer.x < middleX;
+				pointerBefore = state.pointer.y < rect.top ||
+					(state.pointer.y < rect.bottom && beforeInRow);
+			} else {
+				const middle = horizontal ?
+					rect.left + rect.width / 2 : rect.top + rect.height / 2;
+				pointerBefore = pointerPosition < middle;
+			}
+			if (pointerBefore) {
 				insertIndex = i;
 				gapFrame = frame;
 				break;
@@ -1864,15 +1992,62 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 			gapSide = 'after';
 		}
 
+		// The same insertion index means two spots when a section starts
+		// there: the last spot outside the section, above its header, and
+		// the spot of the section's first slide, below it. The side of the
+		// header's middle the pointer is on picks between them: above it
+		// the slides land outside the section and the gap opens above the
+		// header; below it they become the section's first slides and the
+		// gap opens between the header and the slide.
+		let intoSection = null;
+		const boundaryHeader = (gapFrame && gapSide === 'before') ?
+			this._sectionHeaderAt(insertIndex) : null;
+		if (boundaryHeader) {
+			const rect = boundaryHeader.getBoundingClientRect();
+			// A grid header spans its own full row, so the grid boundary
+			// reads vertically even though the slides flow in rows.
+			const useX = horizontal && !state.grid;
+			const middle = useX ?
+				rect.left + rect.width / 2 : rect.top + rect.height / 2;
+			const pointer = useX ? state.pointer.x : state.pointer.y;
+			if (pointer < middle)
+				gapFrame = boundaryHeader;
+			else
+				intoSection = parseInt(
+					boundaryHeader.getAttribute('data-section-index'), 10);
+		}
+
 		state.insertIndex = insertIndex;
+		state.intoSection = intoSection;
 		if (gapFrame === state.gapFrame && gapSide === state.gapSide)
 			return;
 
-		this._removeDropGap(state);
-		state.gapFrame = gapFrame;
-		state.gapSide = gapSide;
-		if (gapFrame)
-			gapFrame.style[this._gapMarginProperty(gapSide)] = state.gapSize + 'px';
+		const applyGap = () => {
+			this._removeDropGap(state);
+			state.gapFrame = gapFrame;
+			state.gapSide = gapSide;
+			if (!gapFrame)
+				return;
+			if (state.grid) {
+				// A margin on a grid item stays inside its own cell and
+				// moves no neighbour, so the grid gap is an empty cell
+				// inserted into the flow where the slides would land.
+				const cell = document.createElement('div');
+				cell.className = 'drop-gap-cell';
+				cell.style.height = state.gapSize + 'px';
+				this._partsPreviewCont.insertBefore(cell,
+					gapSide === 'before' ? gapFrame : gapFrame.nextSibling);
+				state.gapPlaceholder = cell;
+			} else {
+				gapFrame.style[this._gapMarginProperty(gapSide)] = state.gapSize + 'px';
+			}
+		};
+		// A gap move re-places the slides around it in one step; the
+		// animation slides them from their old cells into the new ones.
+		if (state.grid)
+			this._animateGridChange(applyGap);
+		else
+			applyGap();
 
 		// A gap move shifts the slides around it; load the previews of the
 		// ones it brought into view.
@@ -1888,7 +2063,12 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 	_removeDropGap: function (state) {
 		if (!state || !state.gapFrame)
 			return;
-		state.gapFrame.style[this._gapMarginProperty(state.gapSide)] = '';
+		if (state.gapPlaceholder) {
+			state.gapPlaceholder.remove();
+			state.gapPlaceholder = null;
+		} else {
+			state.gapFrame.style[this._gapMarginProperty(state.gapSide)] = '';
+		}
 		state.gapFrame = null;
 		state.gapSide = null;
 	},
@@ -2019,6 +2199,7 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 
 		const container = this._partsPreviewCont;
 		const restoreFrame = function (frame) {
+			frame.style.display = '';
 			frame.style.width = '';
 			frame.style.height = '';
 			frame.style.padding = '';
@@ -2026,6 +2207,20 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 			frame.style.overflow = '';
 			frame.style.boxSizing = '';
 		};
+
+		// A grid drag settles by sliding the slides from their current
+		// cells into the ones the closed gap and the returning frames
+		// give them. The frames come back whole, so there is no size to
+		// grow back.
+		if (state.grid) {
+			this._animateGridChange(() => {
+				this._removeDropGap(state);
+				state.frames.forEach(restoreFrame);
+			});
+			container.classList.remove('dragging-slide');
+			this._schedulePreviewRefresh();
+			return;
+		}
 
 		if (!animate)
 			container.classList.add('drag-no-transition');
@@ -2067,9 +2262,6 @@ window.L.Control.PartsPreview = window.L.Control.extend({
 		// Reached without a drop when the drag was cancelled or released
 		// outside a drop target: put the dragged slides back where they were.
 		this.partsPreview._finishDrag(true);
-		document.querySelectorAll('.slide-section-dropsite').forEach(function (el) {
-			el.classList.remove('slide-section-dropsite');
-		});
 	},
 
 	_invalidateParts: function () {

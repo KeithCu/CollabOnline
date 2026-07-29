@@ -39,8 +39,6 @@
 #include <com/sun/star/geometry/AffineMatrix2D.hpp>
 #include <com/sun/star/geometry/Matrix2D.hpp>
 #include <com/sun/star/lang/XServiceInfo.hpp>
-#include <com/sun/star/rendering/ColorComponentTag.hpp>
-#include <com/sun/star/rendering/CompositeOperation.hpp>
 #include <com/sun/star/rendering/RenderState.hpp>
 #include <com/sun/star/rendering/ViewState.hpp>
 #include <com/sun/star/rendering/XCanvas.hpp>
@@ -66,7 +64,6 @@ namespace canvastools
             setIdentityAffineMatrix2D( renderState.AffineTransform );
             renderState.Clip.clear();
             renderState.DeviceColor = cpo::uno::Sequence< double >();
-            renderState.CompositeOperation = rendering::CompositeOperation::OVER;
 
             return renderState;
         }
@@ -377,59 +374,80 @@ namespace canvastools
         uno::Reference< rendering::XPolyPolygon2D > xPolyPolygonFromB2DPolyPolygon( const uno::Reference< rendering::XGraphicDevice >&  xGraphicDevice,
                                                                                     const ::basegfx::B2DPolyPolygon&                    rPolyPoly    )
         {
-            uno::Reference< rendering::XPolyPolygon2D > xRes;
-
             if( !xGraphicDevice.is() )
-                return xRes;
+                return {};
 
-            const sal_uInt32 nNumPolies( rPolyPoly.count() );
-            sal_uInt32 i;
+            // vcl only handles even_odd polygons
+            rtl::Reference<canvastools::UnoPolyPolygon> xRes = new ::canvastools::UnoPolyPolygon( rPolyPoly, rendering::FillRule_EVEN_ODD );
 
             if( rPolyPoly.areControlPointsUsed() )
-            {
-                xRes = xGraphicDevice->createCompatibleBezierPolyPolygon(
-                              basegfx::unotools::bezierSequenceSequenceFromB2DPolyPolygon( rPolyPoly ) );
-            }
+                return static_cast<rendering::XBezierPolyPolygon2D*>(xRes.get());
             else
-            {
-                xRes = xGraphicDevice->createCompatibleLinePolyPolygon(
-                              basegfx::unotools::pointSequenceSequenceFromB2DPolyPolygon( rPolyPoly ) );
-            }
-
-            for( i=0; i<nNumPolies; ++i )
-            {
-                xRes->setClosed( i, rPolyPoly.getB2DPolygon(i).isClosed() );
-            }
-
-            return xRes;
+                return static_cast<rendering::XLinePolyPolygon2D*>(xRes.get());
         }
 
         uno::Reference< rendering::XPolyPolygon2D > xPolyPolygonFromB2DPolygon( const uno::Reference< rendering::XGraphicDevice >&  xGraphicDevice,
                                                                                 const ::basegfx::B2DPolygon&                        rPoly    )
         {
-            uno::Reference< rendering::XPolyPolygon2D > xRes;
-
             if( !xGraphicDevice.is() )
-                return xRes;
+                return {};
+
+            // vcl only handles even_odd polygons
+            rtl::Reference<canvastools::UnoPolyPolygon> xRes = new ::canvastools::UnoPolyPolygon(basegfx::B2DPolyPolygon(rPoly), rendering::FillRule_EVEN_ODD);
 
             if( rPoly.areControlPointsUsed() )
-            {
-                cpo::uno::Sequence< cpo::uno::Sequence< geometry::RealBezierSegment2D > > outputSequence{ basegfx::unotools::bezierSequenceFromB2DPolygon( rPoly )};
-
-                xRes = xGraphicDevice->createCompatibleBezierPolyPolygon( outputSequence );
-            }
+                return static_cast<rendering::XBezierPolyPolygon2D*>(xRes.get());
             else
+                return static_cast<rendering::XLinePolyPolygon2D*>(xRes.get());
+        }
+
+        /// Convert [0,1] double value to [0,255] int
+        static sal_Int8 toByteColor( double val )
+        {
+            return sal::static_int_cast<sal_Int8>(
+                basegfx::fround(val*255.0));
+        }
+
+        /// Convert [0,255] int value to [0,1] double value
+        static double toDoubleColor( sal_uInt8 val )
+        {
+            return val / 255.0;
+        }
+  
+        cpo::uno::Sequence< double > colorToDoubleSequence( const Color& rColor )
+        {
+            return colorToStdColorSpaceSequence(rColor);
+        }
+
+        Color doubleSequenceToColor( const cpo::uno::Sequence< double >& rColor )
+        {
+            return stdColorSpaceSequenceToColor(rColor);
+        }
+
+        cpo::uno::Sequence< double > colorToStdColorSpaceSequence( const Color& rColor )
+        {
+            return
             {
-                cpo::uno::Sequence< cpo::uno::Sequence< geometry::RealPoint2D > > outputSequence{
-                 basegfx::unotools::pointSequenceFromB2DPolygon( rPoly )};
+                toDoubleColor(rColor.GetRed()),
+                toDoubleColor(rColor.GetGreen()),
+                toDoubleColor(rColor.GetBlue()),
+                toDoubleColor(rColor.GetAlpha())
+            };
+        }
 
-                xRes = xGraphicDevice->createCompatibleLinePolyPolygon( outputSequence );
-            }
+        Color stdColorSpaceSequenceToColor( const cpo::uno::Sequence< double >& rColor        )
+        {
+            ENSURE_ARG_OR_THROW( rColor.getLength() == 4,
+                                 "color must have 4 channels" );
 
-            if( xRes.is() && rPoly.isClosed() )
-                xRes->setClosed( 0, true );
+            Color aColor;
 
-            return xRes;
+            aColor.SetRed  ( toByteColor(rColor[0]) );
+            aColor.SetGreen( toByteColor(rColor[1]) );
+            aColor.SetBlue ( toByteColor(rColor[2]) );
+            aColor.SetAlpha( toByteColor(rColor[3]) );
+
+            return aColor;
         }
 
 } // namespace

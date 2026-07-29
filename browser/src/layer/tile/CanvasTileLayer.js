@@ -391,6 +391,7 @@ window.L.CanvasTileLayer = window.L.Layer.extend({
 
 		// text, presentation, spreadsheet, etc
 		this._docType = options.docType;
+		this._partHasComments = options.partHasComments;
 		this._documentInfo = '';
 		if (!this.isWriter())
 			app.setCursorVisibility(false); // Don't change the default for Writer.
@@ -1863,8 +1864,8 @@ window.L.CanvasTileLayer = window.L.Layer.extend({
 			return;
 		}
 
-		// tells who trigerred cursor invalidation, but recCursors is still "ours"
-		var modifierViewId = parseInt(obj.viewId);
+		const editorViewId = obj.editorViewId !== undefined ? parseInt(obj.editorViewId) : null;
+		var modifierViewId = editorViewId !== null && editorViewId !== -1 ? editorViewId : parseInt(obj.viewId);
 		var weAreModifier = (modifierViewId === this._viewId);
 		if (weAreModifier && app.isFollowingOff())
 			app.setFollowingUser(this._viewId);
@@ -2039,9 +2040,10 @@ window.L.CanvasTileLayer = window.L.Layer.extend({
 			OtherViewCellCursorSection.removeView(viewId);
 		else {
 			let strTwips = obj.rectangle.match(/\d+/g);
+			const cellAddress = strTwips.slice(4).join(','); // Column and row.
 			strTwips = this._convertRawTwipsToTileTwips(strTwips);
 
-			OtherViewCellCursorSection.addOrUpdateOtherViewCellCursor(viewId, this._map.getViewName(viewId), strTwips, parseInt(obj.part));
+			OtherViewCellCursorSection.addOrUpdateOtherViewCellCursor(viewId, this._map.getViewName(viewId), strTwips, parseInt(obj.part), cellAddress);
 			CursorHeaderSection.deletePopUpNow(viewId);
 		}
 
@@ -2591,6 +2593,15 @@ window.L.CanvasTileLayer = window.L.Layer.extend({
 			return;
 
 		if (newSelection.equals(oldSelection.toArray()))
+			return;
+
+		// When user is scrolling the view, don't scroll to selection position.
+		// We also don't scroll when reference marks are visible. They are visible only when user is scrolling via ScrollSection.
+		const mouseControl = app.activeDocument && app.activeDocument.mouseControl;
+		if (mouseControl && mouseControl.mouseDownSent)
+			return;
+
+		if (this._references && !this._references.empty())
 			return;
 
 		const viewedRectangle = app.activeDocument.activeLayout.viewedRectangle;
@@ -3146,24 +3157,12 @@ window.L.CanvasTileLayer = window.L.Layer.extend({
 			}
 		}
 		else if (keepCaretPositionRelativeToScreen) {
-			/* We should be here when:
-				Another view updated the text.
-				That edit changed our cursor position.
-			Now we already set the cursor position to another point.
-			We want to keep the cursor position at the same point relative to screen.
-			Do that only when we are reaching the end of screen so we don't flicker.
-			*/
-			var that = this;
-
-			var isCursorVisible = app.isPointVisibleInTheDisplayedArea(app.file.textCursor.rectangle.toArray());
-
-			if (!isCursorVisible) {
-				setTimeout(function () {
-					var y = app.file.textCursor.rectangle.pY1 - that._cursorPreviousPositionCorePixels.pY1;
-					if (y) {
-						app.sectionContainer.getSectionWithName(app.CSections.Scroll.name).scrollVerticalWithOffset(y);
-					}
-				}, 0);
+			// Another view's edit reflowed the text and moved our cursor. Keep the
+			// caret at the same spot on screen by scrolling the view by the same
+			// amount the caret moved, so the content the user is reading stays put.
+			var y = app.file.textCursor.rectangle.pY1 - this._cursorPreviousPositionCorePixels.pY1;
+			if (y) {
+				app.sectionContainer.getSectionWithName(app.CSections.Scroll.name).scrollVerticalWithOffset(y);
 			}
 		}
 

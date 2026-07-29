@@ -10,15 +10,17 @@
 
 #include <test/bootstrapfixture.hxx>
 
+#include <basegfx/utils/canvastools.hxx>
 #include <vcl/virdev.hxx>
 #include <vcl/BitmapReadAccess.hxx>
+#include <canvas/canvastools.hxx>
 #include <vcl/canvastools.hxx>
 #include <vcl/graphicfilter.hxx>
 #include <tools/stream.hxx>
+#include <unopolypolygon.hxx>
 
 #include <com/sun/star/rendering/CanvasFactory.hpp>
 #include <com/sun/star/rendering/XCanvas.hpp>
-#include <com/sun/star/rendering/CompositeOperation.hpp>
 #include <com/sun/star/rendering/PathCapType.hpp>
 #include <com/sun/star/rendering/PathJoinType.hpp>
 
@@ -57,14 +59,13 @@ public:
     virtual void setUp() override
     {
         BootstrapFixture::setUp();
-        mColorBlack = vcl::unotools::colorToStdColorSpaceSequence(COL_BLACK);
-        mColorBlue = vcl::unotools::colorToStdColorSpaceSequence(COL_BLUE);
+        mColorBlack = canvastools::colorToStdColorSpaceSequence(COL_BLACK);
+        mColorBlue = canvastools::colorToStdColorSpaceSequence(COL_BLUE);
         // Geometry init
         geometry::AffineMatrix2D aUnit(1, 0, 0, 0, 1, 0);
         mViewState.AffineTransform = aUnit;
         mRenderState.AffineTransform = aUnit;
         mRenderState.DeviceColor = mColorBlack;
-        mRenderState.CompositeOperation = rendering::CompositeOperation::OVER;
     }
 
     virtual void tearDown() override
@@ -113,12 +114,14 @@ public:
         mRenderState.AffineTransform = geometry::AffineMatrix2D(2, 0, 0, 0, 2, 0);
         mViewState.AffineTransform = geometry::AffineMatrix2D(5, 0, 0, 0, 5, 0);
 
-        cpo::uno::Sequence<cpo::uno::Sequence<geometry::RealPoint2D>> polygonPoints{
-            { { 10, 5 }, { 88, 5 } }
-        };
-        uno::Reference<rendering::XLinePolyPolygon2D> polygon
-            = mDevice->createCompatibleLinePolyPolygon(polygonPoints);
-        polygon->setClosed(0, false);
+        ::basegfx::B2DPolygon aPoly;
+        aPoly.append({ 10, 5 });
+        aPoly.append({ 88, 5 });
+        aPoly.setClosed(false);
+        ::basegfx::B2DPolyPolygon aPolyPoly;
+        aPolyPoly.append(aPoly);
+        rtl::Reference<canvastools::UnoPolyPolygon> polygon(
+            new ::canvastools::UnoPolyPolygon(aPolyPoly, rendering::FillRule_EVEN_ODD));
 
         mRenderState.DeviceColor = mColorBlue;
         rendering::StrokeAttributes strokeAttributes;
@@ -129,7 +132,8 @@ public:
         strokeAttributes.JoinType = rendering::PathJoinType::MITER;
         strokeAttributes.DashArray = { 10, 5, 0.1, 5 };
 
-        mCanvas->strokePolyPolygon(polygon, mViewState, mRenderState, strokeAttributes);
+        mCanvas->strokePolyPolygon(static_cast<rendering::XLinePolyPolygon2D*>(polygon.get()),
+                                   mViewState, mRenderState, strokeAttributes);
 
         exportDevice(u"test-tdf134053.png"_ustr, mVclDevice);
         Bitmap bitmap = mVclDevice->GetBitmap(Point(), mVclDevice->GetOutputSizePixel());

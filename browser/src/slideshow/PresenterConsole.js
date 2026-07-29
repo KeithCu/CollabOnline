@@ -42,6 +42,8 @@ class PresenterConsole {
 			goBack: _('Go Back'),
 			zoomIn: _('Zoom In'),
 			zoomOut: _('Zoom Out'),
+			currentSlidePreview: _('Preview of the current slide'),
+			nextSlidePreview: _('Preview of the next slide'),
 		};
 		let sanitizer = document.createElement('div');
 		sanitizer.innerText = title;
@@ -86,7 +88,7 @@ class PresenterConsole {
 											</button>
 										</div>
                                         <div id='current-slide-container'>
-                                            <canvas id="current-presentation"></canvas>
+                                            <canvas id="current-presentation" role="img" aria-label="${this.labels.currentSlidePreview}"></canvas>
 											<div id="slideshow-control-container">
 											<div id="navigation-container">
 												<button type="button" id="prev" data-cooltip="${this.labels.previous}" aria-label="${this.labels.previous}">
@@ -98,7 +100,7 @@ class PresenterConsole {
 												</button>
 											</div>
 											<div id="action-buttons-container">
-												<button type="button" id="notes" data-cooltip="${this.labels.notes}" aria-label=${this.labels.notes}">
+												<button type="button" id="notes" data-cooltip="${this.labels.notes}" aria-label="${this.labels.notes}">
 													<img src="${LOUtil.getImageURL('presenterscreen-ButtonNotesNormal.svg')}">
 												</button>
 												<button type="button" id="slides" data-cooltip="${this.labels.slides}" aria-label="${this.labels.slides}">
@@ -115,7 +117,7 @@ class PresenterConsole {
                                      <div id="second-presentation">
                                          <div id="title-next">${this.labels.nextSlide}</div>
                                          <div id='next-slide-container'>
-                                            <img id="next-presentation"></img>
+                                            <img id="next-presentation" alt="${this.labels.nextSlidePreview}"></img>
                                          </div>
                                     </div>
                                   </div>
@@ -930,7 +932,7 @@ class PresenterConsole {
 		// Create the image for the plus button
 		let plusImage = this._proxyPresenter.document.createElement('img');
 		plusImage.src = LOUtil.getImageURL('presenterscreen-ButtonPlusNormal.svg');
-		plusImage.alt = 'Increase Font'; // Optional: Add alt text for accessibility
+		plusImage.alt = this.labels.zoomIn; // Names the button for a screen reader
 		// Add the image inside the plus button
 		plusButton.appendChild(plusImage);
 
@@ -943,7 +945,7 @@ class PresenterConsole {
 		minusImage.src = LOUtil.getImageURL(
 			'presenterscreen-ButtonMinusNormal.svg',
 		);
-		minusImage.alt = 'Decrease Font'; // Optional: Add alt text for accessibility
+		minusImage.alt = this.labels.zoomOut; // Names the button for a screen reader
 
 		// Add the image inside the minus button
 		minusButton.appendChild(minusImage);
@@ -981,9 +983,11 @@ class PresenterConsole {
 		if (this._pause) {
 			imgElem.src = 'images/presenterscreen-ButtonResumeTimerNormal.svg';
 			pauseBtn.setAttribute('data-cooltip', this.labels.resume); // Set the tooltip text
+			pauseBtn.setAttribute('aria-label', this.labels.resume);
 		} else {
 			imgElem.src = 'images/presenterscreen-ButtonPauseTimerNormal.svg';
 			pauseBtn.setAttribute('data-cooltip', this.labels.pause); // Set the tooltip text
+			pauseBtn.setAttribute('aria-label', this.labels.pause);
 		}
 
 		// Kind of special case, on restart we will nor show tooltip on play/pause button

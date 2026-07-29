@@ -265,7 +265,6 @@ endif
 ifneq ($(ENABLE_WASM_STRIP_CANVAS),TRUE)
 $(eval $(call gb_Helper_register_libraries_for_install,OOOLIBS,ooo, \
 	canvastools \
-	cppcanvas \
 	vclcanvas \
 ))
 endif
@@ -534,14 +533,6 @@ $(eval $(call gb_Helper_register_plugins_for_install,PRIVATELIBS_URE,ure, \
     $(call gb_CondLibSalTextenc,sal_textenc) \
 ))
 
-ifneq ($(ENABLE_WASM_STRIP_ACCESSIBILITY),TRUE)
-$(eval $(call gb_Helper_register_libraries_for_install,PLAINLIBS_OOO,ooo, \
-	$(if $(filter WNT,$(OS)), \
-		winaccessibility \
-	) \
-))
-endif
-
 $(eval $(call gb_Helper_register_libraries_for_install,PLAINLIBS_OOO,ooo, \
     $(call gb_Helper_optional,AVMEDIA, \
         $(if $(filter WNT,$(OS)),avmediawin) \
@@ -581,7 +572,6 @@ $(eval $(call gb_Helper_register_libraries_for_install,PLAINLIBS_OOO,ooo, \
 	$(if $(filter WNT,$(OS)), \
 		fps \
 		inprocserv \
-		UAccCOM \
 	) \
 ))
 

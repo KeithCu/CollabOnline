@@ -30,11 +30,11 @@
 #include <com/sun/star/geometry/RealRectangle2D.hpp>
 #include <com/sun/star/geometry/RealSize2D.hpp>
 #include <com/sun/star/lang/IndexOutOfBoundsException.hpp>
-#include <com/sun/star/rendering/CompositeOperation.hpp>
 #include <com/sun/star/rendering/FontRequest.hpp>
 #include <com/sun/star/rendering/PathCapType.hpp>
 #include <com/sun/star/rendering/PathJoinType.hpp>
 #include <com/sun/star/rendering/RenderState.hpp>
+#include <com/sun/star/rendering/StrokeAttributes.hpp>
 #include <com/sun/star/rendering/Texture.hpp>
 #include <com/sun/star/rendering/TexturingMode.hpp>
 #include <com/sun/star/rendering/ViewState.hpp>
@@ -70,122 +70,6 @@ namespace canvastools
             (void)pStr; (void)xIf; (void)nArgPos;
             if( !std::isfinite( rPoint.X ) ||
                 !std::isfinite( rPoint.Y ) )
-            {
-                throw lang::IllegalArgumentException();
-            }
-#endif
-        }
-
-        void verifyInput( const geometry::RealBezierSegment2D&      rSegment,
-                          const char*                               pStr,
-                          const uno::Reference< uno::XInterface >&  xIf,
-                          ::sal_Int16                               nArgPos )
-        {
-#if OSL_DEBUG_LEVEL > 0
-            if( !std::isfinite( rSegment.Px ) )
-            {
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii( pStr ) +
-                    ": verifyInput(): bezier segment's Px value contains infinite or NAN",
-                    xIf, nArgPos );
-            }
-
-            if( !std::isfinite( rSegment.Py ) )
-            {
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii( pStr ) +
-                    ": verifyInput(): bezier segment's Py value contains infinite or NAN",
-                    xIf, nArgPos );
-            }
-
-            if( !std::isfinite( rSegment.C1x ) )
-            {
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii( pStr ) +
-                    ": verifyInput(): bezier segment's C1x value contains infinite or NAN",
-                    xIf, nArgPos );
-            }
-
-            if( !std::isfinite( rSegment.C1y ) )
-            {
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii( pStr ) +
-                    ": verifyInput(): bezier segment's C1y value contains infinite or NAN",
-                    xIf, nArgPos );
-            }
-
-            if( !std::isfinite( rSegment.C2x ) )
-            {
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii( pStr ) +
-                    ": verifyInput(): bezier segment's C2x value contains infinite or NAN",
-                    xIf, nArgPos );
-            }
-
-            if( !std::isfinite( rSegment.C2y ) )
-            {
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii( pStr ) +
-                    ": verifyInput(): bezier segment's C2y value contains infinite or NAN",
-                    xIf, nArgPos );
-            }
-#else
-            (void)pStr; (void)xIf; (void)nArgPos;
-            if( !std::isfinite( rSegment.Px ) ||
-                !std::isfinite( rSegment.Py ) ||
-                !std::isfinite( rSegment.C1x ) ||
-                !std::isfinite( rSegment.C1y ) ||
-                !std::isfinite( rSegment.C2x ) ||
-                !std::isfinite( rSegment.C2y ) )
-            {
-                throw lang::IllegalArgumentException();
-            }
-#endif
-        }
-
-        void verifyInput( const geometry::RealRectangle2D&          rRect,
-                          const char*                               pStr,
-                          const uno::Reference< uno::XInterface >&  xIf,
-                          ::sal_Int16                               nArgPos )
-        {
-#if OSL_DEBUG_LEVEL > 0
-            if( !std::isfinite( rRect.X1 ) )
-            {
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii(pStr) +
-                    ": verifyInput(): rectangle point X1 contains infinite or NAN",
-                    xIf, nArgPos );
-            }
-
-            if( !std::isfinite( rRect.Y1 ) )
-            {
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii(pStr) +
-                    ": verifyInput(): rectangle point Y1 contains infinite or NAN",
-                    xIf, nArgPos );
-            }
-
-            if( !std::isfinite( rRect.X2 ) )
-            {
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii(pStr) +
-                    ": verifyInput(): rectangle point X2 contains infinite or NAN",
-                    xIf, nArgPos );
-            }
-
-            if( !std::isfinite( rRect.Y2 ) )
-            {
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii(pStr) +
-                    ": verifyInput(): rectangle point Y2 contains infinite or NAN",
-                    xIf, nArgPos );
-            }
-#else
-            (void)pStr; (void)xIf; (void)nArgPos;
-            if( !std::isfinite( rRect.X1 ) ||
-                !std::isfinite( rRect.Y1 ) ||
-                !std::isfinite( rRect.X2 ) ||
-                !std::isfinite( rRect.Y2 ) )
             {
                 throw lang::IllegalArgumentException();
             }
@@ -293,21 +177,6 @@ namespace canvastools
                 throw lang::IllegalArgumentException();
 #endif
             }
-
-            if( renderState.CompositeOperation >= rendering::CompositeOperation::CLEAR &&
-                renderState.CompositeOperation <= rendering::CompositeOperation::SATURATE )
-                return;
-
-#if OSL_DEBUG_LEVEL > 0
-            throw lang::IllegalArgumentException(
-                OUString::createFromAscii(pStr) +
-                ": verifyInput(): render state's CompositeOperation value out of range (" +
-                OUString::number(sal::static_int_cast<sal_Int32>(renderState.CompositeOperation)) +
-                " not known)",
-                xIf, nArgPos );
-#else
-            throw lang::IllegalArgumentException();
-#endif
         }
 
         void verifyInput( const rendering::Texture&                 texture,
@@ -327,18 +196,6 @@ namespace canvastools
                     OUString::createFromAscii(pStr) +
                     ": verifyInput(): textures' alpha value out of range (is " +
                     OUString::number(texture.Alpha) + ")",
-                    xIf, nArgPos );
-#else
-                throw lang::IllegalArgumentException();
-#endif
-            }
-
-            if( texture.NumberOfHatchPolygons < 0 )
-            {
-#if OSL_DEBUG_LEVEL > 0
-                throw lang::IllegalArgumentException(
-                    OUString::createFromAscii(pStr) +
-                    ": verifyInput(): textures' NumberOfHatchPolygons is negative",
                     xIf, nArgPos );
 #else
                 throw lang::IllegalArgumentException();
@@ -537,34 +394,6 @@ namespace canvastools
 #else
                 throw lang::IllegalArgumentException();
 #endif
-            }
-        }
-
-        void verifyIndexRange( const geometry::IntegerRectangle2D&  rect,
-                               const geometry::IntegerSize2D&       size )
-        {
-            const ::basegfx::B2IRange aRect(
-                ::basegfx::unotools::b2IRectangleFromIntegerRectangle2D(
-                    rect ) );
-
-            if( aRect.getMinX() < 0 ||
-                aRect.getMaxX() > size.Width ||
-                aRect.getMinY() < 0 ||
-                aRect.getMaxY() > size.Height )
-            {
-                throw css::lang::IndexOutOfBoundsException();
-            }
-        }
-
-        void verifyIndexRange( const geometry::IntegerPoint2D& pos,
-                               const geometry::IntegerSize2D&  size )
-        {
-            if( pos.X < 0 ||
-                pos.X > size.Width ||
-                pos.Y < 0 ||
-                pos.Y > size.Height )
-            {
-                throw css::lang::IndexOutOfBoundsException();
             }
         }
 

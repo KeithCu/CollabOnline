@@ -11,7 +11,12 @@
 #include <comphelper/propertysequence.hxx>
 #include <com/sun/star/linguistic2/XHyphenator.hpp>
 #include <com/sun/star/text/XTextSectionsSupplier.hpp>
+#include <vcl/filter/PDFiumLibrary.hxx>
+#include <vcl/gdimtf.hxx>
 #include <vcl/scheduler.hxx>
+#include <editeng/adjustitem.hxx>
+#include <editeng/udlnitem.hxx>
+#include <editeng/wghtitem.hxx>
 #include <editeng/unolingu.hxx>
 #include <editeng/editobj.hxx>
 #include <comphelper/propertyvalue.hxx>
@@ -1002,6 +1007,60 @@ CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf57187_Tdf158900)
                 u"PortionType::Break");
 }
 
+CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf168777_BlankBeforeFly)
+{
+    // Two underlined paragraphs wrapping around an anchored rectangle, saved by Word with its
+    // "underline trailing space" compatibility option on.
+    createSwDoc("tdf168777-blank-before-fly.docx");
+
+    // Whether a trailing blank shows its decorations is settled while painting.
+    getSwDocShell()->GetPreviewMetaFile();
+    xmlDocUniquePtr pXmlDoc = parseLayoutDump();
+
+    // The first line reads "Foo bar" with the rectangle in between, so the blank after "Foo" is a
+    // hole portion sitting in the middle of the line, before the fly, and there is room for it
+    // before the rectangle. Word decorates that blank, and so should we: only the hole made when
+    // the blanks do not fit the line was taught to show decorations, while the one that
+    // SwTextPortion::FormatEOL makes for a blank before a fly kept them off.
+    static constexpr OString sLine1 = "/root/page/body/txt[1]/SwParaPortion/SwLineLayout[1]"_ostr;
+    assertXPath(pXmlDoc, sLine1 + "/SwHolePortion[1]", "show-underline", u"true");
+
+    // The blanks at the end of the same line keep theirs, as before.
+    assertXPath(pXmlDoc, sLine1 + "/SwHolePortion[2]", "show-underline", u"true");
+}
+
+CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf171688)
+{
+    // The line ends with an underlined word, and the blank after it is not underlined: it is the
+    // next word that gets wrapped, so the blank ends up in a hole portion of its own.
+    createSwDoc("tdf171688.fodt");
+    std::shared_ptr<GDIMetaFile> xMetaFile = getSwDocShell()->GetPreviewMetaFile();
+    MetafileXmlDump dumper;
+    xmlDocUniquePtr pXmlDoc = dumpAndParse(dumper, *xMetaFile);
+
+    // Without the fix the blank was drawn with the font of the word in front of it, so that word's
+    // underline looked like it ran past its end. A hole portion is not in the text group, so the
+    // painter used to leave the font of the previous portion in place for it.
+    assertXPath(pXmlDoc, "//textarray[@length='1']", 1);
+    assertXPath(pXmlDoc, "//textarray[@length='1']/preceding-sibling::font[1]", "underline", u"0");
+}
+
+CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf171959_WrapArea)
+{
+    // Justified underlined text wrapping around a rectangle on the right. The blank that ends each
+    // wrapped line hangs outside the line, and the justification stretches the text right up to the
+    // rectangle, so the blank lands in the space reserved for the wrap.
+    createSwDoc("underline-in-wrap-area.fodt");
+    std::shared_ptr<GDIMetaFile> xMetaFile = getSwDocShell()->GetPreviewMetaFile();
+    MetafileXmlDump dumper;
+    xmlDocUniquePtr pXmlDoc = dumpAndParse(dumper, *xMetaFile);
+
+    // Three lines wrap against the rectangle, and each ends in such a blank. Without the fix they
+    // kept their underline, which was then drawn inside the reserved space.
+    assertXPath(pXmlDoc, "//textarray[@length='1']", 3);
+    assertXPath(pXmlDoc, "//textarray[@length='1'][preceding-sibling::font[1]/@underline!='0']", 0);
+}
+
 CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf147666)
 {
     createSwDoc("tdf147666.odt");
@@ -1160,6 +1219,18 @@ CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testPageBreakInHiddenSection)
     assertXPath(pXmlDoc, "//page[4]/body/section/infos/bounds", "height", u"0");
 }
 
+// The chart object's own drawing, inside the page's metafile.
+constexpr OString aChart = "/metafile/push[1]/push[1]/push[1]/push[3]/push[1]/push[1]/push[1]"_ostr;
+
+// One of the chart's text runs, counted among the runs themselves rather than among the groups
+// they sit in. A run is put in a group of its own only when it needs a map mode of its own, and
+// that depends on the font size, on the platform's font metrics, and on whether the drawing goes
+// through the Kit, so the groups do not give a run a stable address.
+OString getChartTextXPath(std::string_view aPosition)
+{
+    return "(" + aChart + "//textarray)[" + aPosition + "]/text";
+}
+
 CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf159443)
 {
     // Given a document with chart, which have a datatable
@@ -1171,22 +1242,15 @@ CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf159443)
     MetafileXmlDump dumper;
     xmlDocUniquePtr pXmlDoc = dumpAndParse(dumper, *xMetaFile);
     CPPUNIT_ASSERT(pXmlDoc);
+    // The data table writes its cells before anything else in the chart, so its first three text
+    // runs are the column header and the first row's header and value.
     //// Without the fix, this would fail:
     //// - Expected: DataSeries1
     //// - Actual  : 1.25
     //// - In <>, XPath contents of child does not match
-    assertXPathContent(
-        pXmlDoc,
-        "/metafile/push[1]/push[1]/push[1]/push[3]/push[1]/push[1]/push[1]/push[47]/textarray/text",
-        u"DataSeries1");
-    assertXPathContent(
-        pXmlDoc,
-        "/metafile/push[1]/push[1]/push[1]/push[3]/push[1]/push[1]/push[1]/push[49]/textarray/text",
-        u"Category1");
-    assertXPathContent(
-        pXmlDoc,
-        "/metafile/push[1]/push[1]/push[1]/push[3]/push[1]/push[1]/push[1]/push[51]/textarray/text",
-        u"4.3");
+    assertXPathContent(pXmlDoc, getChartTextXPath("1"), u"DataSeries1");
+    assertXPathContent(pXmlDoc, getChartTextXPath("2"), u"Category1");
+    assertXPathContent(pXmlDoc, getChartTextXPath("3"), u"4.3");
 }
 
 CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf159422)
@@ -1200,28 +1264,22 @@ CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf159422)
     MetafileXmlDump dumper;
     xmlDocUniquePtr pXmlDoc = dumpAndParse(dumper, *xMetaFile);
     CPPUNIT_ASSERT(pXmlDoc);
+    // Each data table row is keyed by a symbol filled in its series' color. The bars carry the
+    // same colors, but a bar is clipped to the plot area, so its color sits one level deeper.
+    auto getSymbolY = [this, &pXmlDoc](const char* pColor) {
+        return getXPath(pXmlDoc,
+                        OString::Concat(aChart) + "/push[fillcolor/@color='" + pColor
+                            + "']/polypolygon/polygon/point[1]",
+                        "y")
+            .toInt32();
+    };
     //// Without the fix, this would fail:
     //// - Expected: 5877
     //// - Actual  : 5649
     //// - Delta   : 20
-    sal_Int32 nYSymbol1 = getXPath(pXmlDoc,
-                                   "/metafile/push[1]/push[1]/push[1]/push[3]/push[1]/push[1]/"
-                                   "push[1]/push[99]/polypolygon/polygon/point[1]",
-                                   "y")
-                              .toInt32();
-    CPPUNIT_ASSERT_DOUBLES_EQUAL(5877, nYSymbol1, 20);
-    sal_Int32 nYSymbol2 = getXPath(pXmlDoc,
-                                   "/metafile/push[1]/push[1]/push[1]/push[3]/push[1]/push[1]/"
-                                   "push[1]/push[100]/polypolygon/polygon/point[1]",
-                                   "y")
-                              .toInt32();
-    CPPUNIT_ASSERT_DOUBLES_EQUAL(6225, nYSymbol2, 20);
-    sal_Int32 nYSymbol3 = getXPath(pXmlDoc,
-                                   "/metafile/push[1]/push[1]/push[1]/push[3]/push[1]/push[1]/"
-                                   "push[1]/push[101]/polypolygon/polygon/point[1]",
-                                   "y")
-                              .toInt32();
-    CPPUNIT_ASSERT_DOUBLES_EQUAL(6573, nYSymbol3, 20);
+    CPPUNIT_ASSERT_DOUBLES_EQUAL(5877, getSymbolY("#004586"), 20);
+    CPPUNIT_ASSERT_DOUBLES_EQUAL(6225, getSymbolY("#ff420e"), 20);
+    CPPUNIT_ASSERT_DOUBLES_EQUAL(6573, getSymbolY("#ffd320"), 20);
 }
 
 CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf159456)
@@ -1234,18 +1292,13 @@ CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf159456)
     std::shared_ptr<GDIMetaFile> xMetaFile = pShell->GetPreviewMetaFile();
     MetafileXmlDump dumper;
     xmlDocUniquePtr pXmlDoc = dumpAndParse(dumper, *xMetaFile);
+    // The y axis labels are the last text runs the chart writes, and this axis runs 0 to 6.
     //// Without the fix, this would fail:
     //// - Expected: 1
     //// - Actual  : 1.5
     //// - In <>, XPath contents of child does not match
-    assertXPathContent(pXmlDoc,
-                       "/metafile/push[1]/push[1]/push[1]/push[3]/push[1]/push[1]/push[1]/"
-                       "push[103]/textarray/text",
-                       u"1");
-    assertXPathContent(pXmlDoc,
-                       "/metafile/push[1]/push[1]/push[1]/push[3]/push[1]/push[1]/push[1]/"
-                       "push[104]/textarray/text",
-                       u"2");
+    assertXPathContent(pXmlDoc, getChartTextXPath("last()-5"), u"1");
+    assertXPathContent(pXmlDoc, getChartTextXPath("last()-4"), u"2");
 }
 
 CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, test_i84870)
@@ -1971,6 +2024,187 @@ CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, TestTdf164098)
 
     // Without the fix, this line will cause a freeze:
     pWrtShell->Insert(u"ـ"_ustr);
+}
+
+CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf171959)
+{
+    // Every line of this document ends in a blank, and the text is justified and underlined.
+    createSwDoc("tdf171959.odt");
+
+    // Whether the trailing blank is decorated can only be settled once the line has been adjusted,
+    // which happens on the way to painting.
+    std::shared_ptr<GDIMetaFile> xMetaFile = getSwDocShell()->GetPreviewMetaFile();
+
+    // Justification stretches each line to the right margin, leaving no room for the trailing
+    // blank, which hangs outside the text area. Without the fix the blank kept its underline, so
+    // the underline was drawn past the margin.
+    xmlDocUniquePtr pLayout = parseLayoutDump();
+    assertXPath(pLayout, "//SwHolePortion", 7);
+    assertXPath(pLayout, "//SwHolePortion[@show-underline='true']", 0);
+
+    // The blank is still painted (tdf#43244), only without decorations.
+    MetafileXmlDump dumper;
+    xmlDocUniquePtr pMetaXml = dumpAndParse(dumper, *xMetaFile);
+    assertXPath(pMetaXml, "//textarray[@length='1']", 7);
+    assertXPath(pMetaXml, "//textarray[@length='1'][preceding-sibling::font[1]/@underline!='0']",
+                0);
+}
+
+CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf171959Centered)
+{
+    // Same document, but centred: here the trailing blank has the right half of the free space to
+    // live in, so its decorations may show as far as that reaches.
+    createSwDoc("tdf171959-center.odt");
+    getSwDocShell()->GetPreviewMetaFile();
+
+    xmlDocUniquePtr pLayout = parseLayoutDump();
+
+    // A line with 365 twips to spare decorates the whole 60 twip blank.
+    assertXPath(pLayout, "//txt[1]/SwParaPortion/SwLineLayout[2]/SwHolePortion", "width", u"60");
+    assertXPath(pLayout, "//txt[1]/SwParaPortion/SwLineLayout[2]/SwHolePortion", "show-underline",
+                u"true");
+
+    // A line with only 49 twips left decorates that much, and an undecorated hole carries the rest
+    // of the blank, so the cursor still travels over all of it.
+    assertXPath(pLayout, "//txt[1]/SwParaPortion/SwLineLayout[5]/SwHolePortion[1]", "width", u"49");
+    assertXPath(pLayout, "//txt[1]/SwParaPortion/SwLineLayout[5]/SwHolePortion[1]",
+                "show-underline", u"true");
+    assertXPath(pLayout, "//txt[1]/SwParaPortion/SwLineLayout[5]/SwHolePortion[2]", "width", u"11");
+    assertXPath(pLayout, "//txt[1]/SwParaPortion/SwLineLayout[5]/SwHolePortion[2]",
+                "show-underline", u"false");
+}
+
+CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf171959ManyBlanks)
+{
+    // A centred line ending in many blanks: only the right half of the free space is inside the
+    // text area, so roughly half of the blanks may keep the decoration.
+    createSwDoc();
+    SwWrtShell* pWrtShell = getSwDocShell()->GetWrtShell();
+    pWrtShell->SetAttrItem(SvxAdjustItem(SvxAdjust::Center, RES_PARATR_ADJUST));
+    pWrtShell->Insert("foo" + RepeatedUChar(' ', 200));
+    getSwDocShell()->GetPreviewMetaFile();
+
+    xmlDocUniquePtr pLayout = parseLayoutDump();
+
+    // The blank was already too long for the line, so it had a plain hole after it: what no longer
+    // fits the text area joins that one instead of making a third.
+    assertXPath(pLayout, "//SwLineLayout/SwHolePortion", 2);
+    assertXPath(pLayout, "//SwLineLayout/SwHolePortion[1]", "show-underline", u"true");
+    assertXPath(pLayout, "//SwLineLayout/SwHolePortion[2]", "show-underline", u"false");
+
+    // The blanks are shared out, not squeezed into the decorated part, and none go missing.
+    const sal_Int32 nLen1
+        = getXPath(pLayout, "//SwLineLayout/SwHolePortion[1]", "length").toInt32();
+    const sal_Int32 nLen2
+        = getXPath(pLayout, "//SwLineLayout/SwHolePortion[2]", "length").toInt32();
+    CPPUNIT_ASSERT_GREATER(sal_Int32(1), nLen1);
+    CPPUNIT_ASSERT_GREATER(sal_Int32(0), nLen2);
+    CPPUNIT_ASSERT_EQUAL(sal_Int32(200), nLen1 + nLen2);
+}
+
+CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTrailingBlankInUntaggedPdf)
+{
+    // The same centred line ending in many blanks, this time exported to PDF with tagging off.
+    createSwDoc();
+    SwWrtShell* pWrtShell = getSwDocShell()->GetWrtShell();
+    pWrtShell->SetAttrItem(SvxAdjustItem(SvxAdjust::Center, RES_PARATR_ADJUST));
+    pWrtShell->SetAttrItem(SvxUnderlineItem(LINESTYLE_SINGLE, RES_CHRATR_UNDERLINE));
+    pWrtShell->Insert("foo" + RepeatedUChar(' ', 200));
+    getSwDocShell()->GetPreviewMetaFile();
+
+    // The decorated part of the blank, in points.
+    xmlDocUniquePtr pLayout = parseLayoutDump();
+    const double fBlank
+        = getXPath(pLayout, "//SwLineLayout/SwHolePortion[1]", "width").toDouble() / 20;
+
+    save(TestFilter::PDF_WRITER,
+         { comphelper::makePropertyValue(
+             u"FilterData"_ustr,
+             comphelper::InitPropertySequence({ { "UseTaggedPDF", cpo::uno::Any(false) } })) });
+
+    std::unique_ptr<vcl::pdf::PDFiumDocument> pPdf = parsePDFExport();
+    if (!pPdf)
+        return;
+    std::unique_ptr<vcl::pdf::PDFiumPage> pPage = pPdf->openPage(0);
+    int nText = 0;
+    std::vector<basegfx::B2DRectangle> aUnderlines;
+    for (int i = 0; i < pPage->getObjectCount(); ++i)
+    {
+        std::unique_ptr<vcl::pdf::PDFiumPageObject> pObject = pPage->getObject(i);
+        if (pObject->getType() == vcl::pdf::PDFPageObjectType::Text)
+            ++nText;
+        else if (pObject->getType() == vcl::pdf::PDFPageObjectType::Path)
+            aUnderlines.push_back(pObject->getBounds());
+    }
+
+    // Turning tagging off used to drop the trailing blank from the export altogether, leaving only
+    // the word and its underline. The word and both halves of the blank are written out now, ...
+    CPPUNIT_ASSERT_EQUAL(3, nText);
+    // ... and the word and the decorated half of the blank each carry an underline. This is what a
+    // tagged export of the same document produces, down to the position of every object.
+    CPPUNIT_ASSERT_EQUAL(size_t(2), aUnderlines.size());
+
+    // The blank's underline is as long as the blank. An export used to write out a single space
+    // whatever the blank's real length, so the underline stopped one space in.
+    CPPUNIT_ASSERT_DOUBLES_EQUAL(fBlank, aUnderlines[1].getWidth(), 1.0);
+}
+
+CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf32181)
+{
+    // A justified, underlined paragraph: the attachment of tdf#32181 / i68503, with its font
+    // changed to a bundled one. Justification stretches the blank each line ends in, and the blank
+    // used to be underlined, so the underline ran off to the right well past the margin.
+    createSwDoc("underline-over-margin.odt");
+    save(TestFilter::PDF_WRITER,
+         { comphelper::makePropertyValue(
+             u"FilterData"_ustr,
+             comphelper::InitPropertySequence({ { "UseTaggedPDF", cpo::uno::Any(false) } })) });
+
+    std::unique_ptr<vcl::pdf::PDFiumDocument> pPdf = parsePDFExport();
+    if (!pPdf)
+        return;
+    std::unique_ptr<vcl::pdf::PDFiumPage> pPage = pPdf->openPage(0);
+
+    // The page is 21 cm wide with a 2 cm right margin, so text ends here. An underline is drawn a
+    // little wider than the run it belongs to, at both ends, hence the tolerance.
+    const double fRightMargin = 19.0 * 72 / 2.54;
+    for (int i = 0; i < pPage->getObjectCount(); ++i)
+    {
+        std::unique_ptr<vcl::pdf::PDFiumPageObject> pObject = pPage->getObject(i);
+        if (pObject->getType() != vcl::pdf::PDFPageObjectType::Path)
+            continue;
+        // The underline of the stretched blank reached the edge of the page.
+        CPPUNIT_ASSERT_LESS(fRightMargin + 1.0, pObject->getBounds().getMaxX());
+    }
+}
+
+CPPUNIT_TEST_FIXTURE(SwLayoutWriter4, testTdf171692)
+{
+    // A justified paragraph whose single line ends in a long run of blanks. The blanks are split
+    // over two hole portions, and both of them hang outside the line.
+    createSwDoc("tdf171692.odt");
+    SwWrtShell* pWrtShell = getSwDocShell()->GetWrtShell();
+    getSwDocShell()->GetPreviewMetaFile();
+
+    // Bolding a word in the middle reformats the line.
+    pWrtShell->SttEndDoc(/*bStart=*/true);
+    pWrtShell->Right(SwCursorSkipMode::Chars, /*bSelect=*/false, 24, /*bBasicCall=*/false);
+    pWrtShell->Right(SwCursorSkipMode::Chars, /*bSelect=*/true, 4, /*bBasicCall=*/false);
+    pWrtShell->SetAttrItem(SvxWeightItem(WEIGHT_BOLD, RES_CHRATR_WEIGHT));
+
+    // Without the fix only the last of the two holes was left out of the width the line would
+    // have without shrinking. The line then looked wider than the text area, so its spaces were
+    // shrunk to a negative width: the words were drawn on top of each other, and walking right
+    // through the text took the cursor backwards at every space.
+    pWrtShell->SttEndDoc(/*bStart=*/true);
+    SwTwips nPrev = 0;
+    for (int i = 0; i < 90; ++i)
+    {
+        const SwTwips nX = pWrtShell->GetCharRect().Left();
+        CPPUNIT_ASSERT_MESSAGE("the cursor moved backwards", nX >= nPrev);
+        nPrev = nX;
+        pWrtShell->Right(SwCursorSkipMode::Chars, /*bSelect=*/false, 1, /*bBasicCall=*/false);
+    }
 }
 
 } // end of anonymous namespace

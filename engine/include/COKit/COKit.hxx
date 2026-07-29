@@ -11,7 +11,6 @@
 
 #include "COKit.h"
 #include "COKitEnums.h"
-#include "COKitInit.h"
 
 /*
  * The reasons this C++ code is not as pretty as it could be are:
@@ -70,7 +69,6 @@ public:
         return mpDoc->pClass->getDocumentType(mpDoc);
     }
 
-#if defined KIT_USE_UNSTABLE_API || defined LIBO_INTERNAL_ONLY
     /**
      * Get number of part that the document contains.
      *
@@ -981,7 +979,6 @@ public:
         mpDoc->pClass->setColorPreviewState(mpDoc, nId, nEnabled);
     }
 
-#endif // defined KIT_USE_UNSTABLE_API || defined LIBO_INTERNAL_ONLY
 };
 
 /// The kit::Office class represents one started COKit instance.
@@ -1471,21 +1468,6 @@ public:
         freeError(pFree);
     }
 };
-
-/// Create a kit::Office instance.
-///
-/// Presumably you are not supposed to create multiple kit::Office
-/// instances in the same process. Possibly not even a new one after
-/// destroying a previous one.
-///
-/// For information on the parameters, see writeup for cok_init_2 in COKitInit.h.
-inline Office* kit_cpp_init(const char* pInstallPath, const char* pUserProfileUrl = NULL)
-{
-    COKit* pThis = cok_init_2(pInstallPath, pUserProfileUrl);
-    if (pThis == NULL)
-        return NULL;
-    return new ::kit::Office(pThis);
-}
 
 }
 

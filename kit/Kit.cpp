@@ -110,7 +110,6 @@ Util::LoadTimings KitLoadTimings;
 #include <thread>
 #include <utility>
 
-#define KIT_USE_UNSTABLE_API
 #include <COKit/COKitInit.h>
 #include <COKit/COKit.hxx>
 
@@ -386,7 +385,7 @@ namespace
                    path != std::string_view("sdk") &&
                    path != std::string_view("debugsource") &&
                    path != std::string_view("share/basic") &&
-                   !std::string_view(path).starts_with(std::string_view("share/extentions/dict")) &&
+                   !std::string_view(path).starts_with(std::string_view("share/extensions/dict")) &&
                    path != std::string_view("share/Scripts/java") &&
                    path != std::string_view("share/Scripts/javascript") &&
                    path != std::string_view("share/config/wizard") &&
@@ -1015,6 +1014,37 @@ void Document::setDocumentPassword(int passwordType)
     LOG_INF("setDocumentPassword returned.");
 }
 
+uint64_t Document::partUniqueId(int part) const
+{
+    LOKitHelper::ScopedString partInfo(
+        _loKitDocument->get()->pClass->getPartInfo(_loKitDocument->get(), part));
+    if (!partInfo.get())
+        return 0;
+    try
+    {
+        const auto var = Poco::JSON::Parser().parse(std::string(partInfo.get()));
+        const auto& obj = var.extract<Poco::JSON::Object::Ptr>();
+        if (obj && obj->has("hash"))
+            return obj->getValue<uint64_t>("hash");
+    }
+    catch (const std::exception& exc)
+    {
+        LOG_DBG("Failed to read the part info of part " << part << ": " << exc.what());
+    }
+    return 0;
+}
+
+int Document::findPartByUniqueId(uint64_t uniqueId) const
+{
+    const int parts = _loKitDocument->getParts();
+    for (int part = 0; part < parts; ++part)
+    {
+        if (partUniqueId(part) == uniqueId)
+            return part;
+    }
+    return -1;
+}
+
 void Document::renderTiles(TileCombined &tileCombined)
 {
     // Find a session matching our view / render settings.
@@ -1044,6 +1074,30 @@ void Document::renderTiles(TileCombined &tileCombined)
     if (tileCombined.getCanonicalViewId() != CanonicalViewId::None)
         _loKitDocument->setView(session->getViewId());
 
+    // A preview request names the slide it asks for by the slide's unique id, and always
+    // travels alone in its combined request. The parts can be renumbered between the request
+    // and the render, so resolve the id to the index the slide holds now and paint from there.
+    // The tile descriptor stays as requested: its part is the request's slot and its unique id
+    // is the slide the pixels show.
+    const auto docType = _loKitDocument->getDocumentType();
+    int paintPart = -1;
+    if (docType == KIT_DOCTYPE_PRESENTATION || docType == KIT_DOCTYPE_DRAWING)
+    {
+        const std::vector<TileDesc>& tiles = tileCombined.getTiles();
+        if (tiles.size() == 1 && tiles[0].isPreview() &&
+            tiles[0].getUniqueId() != partUniqueId(tiles[0].getPart()))
+        {
+            paintPart = findPartByUniqueId(tiles[0].getUniqueId());
+            if (paintPart < 0)
+            {
+                // The requested slide is gone; there is nothing to paint.
+                LOG_DBG("Skipping the preview of the gone slide with unique id "
+                        << tiles[0].getUniqueId());
+                return;
+            }
+        }
+    }
+
     const auto blenderFunc = [&](unsigned char* data, int offsetX, int offsetY,
                                  std::size_t pixmapWidth, std::size_t pixmapHeight,
                                  int pixelWidth, int pixelHeight, COKitTileMode mode) {
@@ -1060,7 +1114,7 @@ void Document::renderTiles(TileCombined &tileCombined)
 
     if (!RenderTiles::doRender(_loKitDocument, *_deltaGen, tileCombined, getSyncPool(),
                                blenderFunc, postMessageFunc, errorMessageFunc, _mobileAppDocId,
-                               session->getCanonicalViewId(), session->getDumpTiles()))
+                               session->getCanonicalViewId(), session->getDumpTiles(), paintPart))
     {
         LOG_DBG("All tiles skipped, not producing empty tilecombine: message");
         return;

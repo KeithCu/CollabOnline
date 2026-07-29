@@ -33,13 +33,6 @@ using namespace ::com::sun::star;
 
 namespace canvas
 {
-    cpo::uno::Sequence<OUString> ParametricPolyPolygon::getAvailableServiceNames()
-    {
-        return {u"LinearGradient"_ustr,
-                u"EllipticalGradient"_ustr,
-                u"RectangularGradient"_ustr};
-    }
-
     rtl::Reference<ParametricPolyPolygon> ParametricPolyPolygon::create(
         const uno::Reference< rendering::XGraphicDevice >& rDevice,
         std::u16string_view rServiceName,
@@ -109,24 +102,6 @@ namespace canvas
     void ParametricPolyPolygon::disposing(std::unique_lock<std::mutex>&)
     {
         mxDevice.clear();
-    }
-
-    uno::Reference< rendering::XPolyPolygon2D > ParametricPolyPolygon::getOutline( double /*t*/ )
-    {
-        // TODO(F1): outline NYI
-        return uno::Reference< rendering::XPolyPolygon2D >();
-    }
-
-    cpo::uno::Sequence< double > ParametricPolyPolygon::getColor( double /*t*/ )
-    {
-        // TODO(F1): color NYI
-        return cpo::uno::Sequence< double >();
-    }
-
-    cpo::uno::Sequence< double > ParametricPolyPolygon::getPointColor( const geometry::RealPoint2D& /*point*/ )
-    {
-        // TODO(F1): point color NYI
-        return cpo::uno::Sequence< double >();
     }
 
     OUString ParametricPolyPolygon::getImplementationName(  )

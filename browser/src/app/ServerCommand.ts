@@ -40,6 +40,7 @@ class ServerCommand {
 	public rtlParts?: number[];
 	public protectedParts?: number[];
 	public hash?: string;
+	public uniqueId?: number;
 	public nopng?: boolean;
 	public username?: string;
 	public pageRectangleList?: number[][];
@@ -58,6 +59,7 @@ class ServerCommand {
 	public part?: number;
 	public parts?: number;
 	public selectedPart?: number;
+	public partHasComments?: boolean;
 
 	constructor(msg: string, map: MapZoomInterface) {
 		this.parse(msg, map);
@@ -159,6 +161,8 @@ class ServerCommand {
 				);
 			} else if (tokens[i].startsWith('hash=')) {
 				this.hash = tokens[i].substring('hash='.length);
+			} else if (tokens[i].startsWith('uniqueid=')) {
+				this.uniqueId = parseInt(tokens[i].substring('uniqueid='.length));
 			} else if (tokens[i] === 'nopng') {
 				this.nopng = true;
 			} else if (tokens[i].substring(0, 9) === 'username=') {

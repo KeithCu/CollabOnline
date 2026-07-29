@@ -366,6 +366,13 @@ class MouseControl extends CanvasSectionObject {
 
 		this.setCursorType();
 
+		// Not while dragging, or it would fire in the middle of a selection.
+		if (!this.containerObject.isDraggingSomething())
+			OtherViewCellCursorSection.checkHover([
+				point.pX + this.myTopLeft[0],
+				point.pY + this.myTopLeft[1],
+			]);
+
 		if (this.clickTimer) return;
 
 		clearTimeout(this.mouseMoveTimer);
@@ -416,14 +423,16 @@ class MouseControl extends CanvasSectionObject {
 				this.mouseDownSent = true;
 			}
 
-			if (!this.containerObject.isMouseInside()) {
-				point.pX += this.position[0];
-				point.pY += this.position[1];
-				app.map.fire('handleautoscroll', {
-					pos: { x: point.cX, y: point.cY },
-					map: app.map,
-				});
-			} else app.map.fire('scrollvelocity', { vx: 0, vy: 0 });
+			// Autoscroll toward whichever viewport edge the pointer is near,
+			// whether it is just inside that edge or already past it. The handler
+			// gives zero velocity and stops autoscroll when the pointer is not near
+			// an edge, so a pointer resting in the middle does not scroll.
+			point.pX += this.position[0];
+			point.pY += this.position[1];
+			app.map.fire('handleautoscroll', {
+				pos: { x: point.cX, y: point.cY },
+				map: app.map,
+			});
 
 			this.postCoreMouseEvent(
 				'move',
@@ -544,6 +553,7 @@ class MouseControl extends CanvasSectionObject {
 		// But this is a class name and we need to remove it.
 		if (app.map._docLayer._docType === 'spreadsheet') {
 			this.context.canvas.classList.remove('spreadsheet-cursor');
+			OtherViewCellCursorSection.resetHover();
 		}
 	}
 

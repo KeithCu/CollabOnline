@@ -185,8 +185,6 @@ namespace vclcanvas
                               const css::rendering::RenderState&   renderState,
                               ColorType                            eColorType ) const;
 
-        bool hasAlpha() const { return mbHaveAlpha; }
-
     protected:
         /** Phyical output device
 
@@ -200,9 +198,6 @@ namespace vclcanvas
 
         /// Rendering to this outdev does not preserve its state
         OutDevProviderSharedPtr                      mpOutDevProvider;
-
-        /// Rendering to this outdev does not preserve its state
-        OutDevProviderSharedPtr                      mp2ndOutDevProvider;
 
         /// When true, content is able to represent alpha
         bool                                         mbHaveAlpha;

@@ -11,6 +11,11 @@
 
 $(eval $(call gb_CppunitTest_CppunitTest,canvas_test))
 
+$(eval $(call gb_CppunitTest_set_include,canvas_test,\
+	-I$(SRCDIR)/canvas/inc \
+	$$(INCLUDE) \
+))
+
 $(eval $(call gb_CppunitTest_add_exception_objects,canvas_test, \
     canvas/qa/cppunit/canvastest \
 ))
@@ -19,6 +24,7 @@ $(eval $(call gb_CppunitTest_use_external,canvas_test,boost_headers))
 
 $(eval $(call gb_CppunitTest_use_libraries,canvas_test, \
     basegfx \
+    canvastools \
     comphelper \
     cppu \
     cppuhelper \

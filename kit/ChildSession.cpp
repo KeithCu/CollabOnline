@@ -38,7 +38,6 @@
 #include <kit/PythonComputeEmitter.hpp>
 #include <kit/SlideCompressor.hpp>
 
-#define KIT_USE_UNSTABLE_API
 #include <COKit/COKit.hxx>
 #include <COKit/COKitEnums.h>
 
@@ -3787,7 +3786,7 @@ bool ChildSession::getSlideSections()
     getLOKitDocument()->setView(_viewId);
 
     LOKitHelper::ScopedString info(getLOKitDocument()->getPresentationInfo());
-    if (!info || !info.get())
+    if (!info)
     {
         sendTextFrame("slidesections: []");
         return true;
