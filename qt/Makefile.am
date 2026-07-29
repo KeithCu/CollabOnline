@@ -61,6 +61,7 @@ cmake_list= \
             ../kit/KitQueue.cpp \
             ../kit/LogUI.cpp \
             ../kit/KitWebSocket.cpp \
+            ../kit/PythonComputeEmitter.cpp \
             ../net/FakeSocket.cpp \
             ../net/Socket.cpp \
             ../wsd/AIChatSession.cpp \

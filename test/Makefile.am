@@ -81,6 +81,7 @@ all_la_unit_tests = \
 	unit-wopi-edge-cases.la \
 	unit-socket-failure.la \
 	unit-kit-child-session.la \
+	unit-python-compute.la \
 	unit-wopi-fileurl.la \
 	unit-cursor.la \
 	unit-copy-paste-writer.la \
@@ -385,6 +386,8 @@ unit_any_input_la_SOURCES = UnitAnyInput.cpp
 unit_any_input_la_LIBADD = $(CPPUNIT_LIBS)
 unit_kit_child_session_la_SOURCES = UnitKitChildSession.cpp
 unit_kit_child_session_la_LIBADD = $(CPPUNIT_LIBS)
+unit_python_compute_la_SOURCES = UnitPythonCompute.cpp
+unit_python_compute_la_LIBADD = $(CPPUNIT_LIBS)
 unit_large_paste_la_SOURCES = UnitLargePaste.cpp
 unit_large_paste_la_LIBADD = $(CPPUNIT_LIBS)
 unit_paste_la_SOURCES = UnitPaste.cpp

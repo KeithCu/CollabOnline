@@ -328,7 +328,8 @@ coolforkit_sources = \
                      kit/ChildSession.cpp \
                      kit/ForKit.cpp \
                      kit/Kit.cpp \
-                     kit/KitWebSocket.cpp
+                     kit/KitWebSocket.cpp \
+                     kit/PythonComputeEmitter.cpp
 
 coolforkit_ldadd = libsimd.a libkitglobals.a $(POCO_LIBS_HOST)
 
