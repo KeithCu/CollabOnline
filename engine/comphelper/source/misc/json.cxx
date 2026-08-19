@@ -28,6 +28,7 @@
 #include <com/sun/star/uno/RuntimeException.hpp>
 #include <cpo/uno/Type.hxx>
 #include <com/sun/star/uno/XInterface.hpp>
+#include <comphelper/json.hxx>
 #include <cpo/uno/genfunc.hxx>
 #include <o3tl/unreachable.hxx>
 #include <rtl/strbuf.hxx>
@@ -36,8 +37,6 @@
 #include <typelib/typedescription.h>
 #include <typelib/typedescription.hxx>
 #include <uno/data.h>
-
-#include "json.hxx"
 
 namespace
 {
@@ -423,7 +422,7 @@ bool splitJsonObject(OUString const& json, std::map<OUString, OUString>& out)
 }
 }
 
-void appendUnoAsJson(OStringBuffer& buf, cpo::uno::Type const& type, void const* value)
+void comphelper::appendUnoAsJson(OStringBuffer& buf, cpo::uno::Type const& type, void const* value)
 {
     switch (type.getTypeClass())
     {
@@ -586,7 +585,7 @@ void appendUnoAsJson(OStringBuffer& buf, cpo::uno::Type const& type, void const*
     }
 }
 
-cpo::uno::Any parseJsonToAny(OUString const& json, cpo::uno::Type const& type)
+cpo::uno::Any comphelper::parseJsonToAny(OUString const& json, cpo::uno::Type const& type)
 {
     switch (type.getTypeClass())
     {

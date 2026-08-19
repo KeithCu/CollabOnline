@@ -52,6 +52,7 @@
 #include <com/sun/star/uno/XComponentContext.hpp>
 #include <com/sun/star/uno/XInterface.hpp>
 #include <cpo/uno/genfunc.hxx>
+#include <comphelper/json.hxx>
 #include <comphelper/legacyunoapinotice.hxx>
 #include <comphelper/processfactory.hxx>
 #include <cppuhelper/exc_hlp.hxx>
@@ -73,8 +74,6 @@
 #include <vcl/kit.hxx>
 #include <vcl/svapp.hxx>
 #include <uno/data.h>
-
-#include "json.hxx"
 
 namespace
 {
@@ -2516,7 +2515,7 @@ public:
                     for (auto const& a : aParams)
                     {
                         OStringBuffer buf;
-                        appendUnoAsJson(buf, a.getValueType(), a.getValue());
+                        comphelper::appendUnoAsJson(buf, a.getValueType(), a.getValue());
                         w.putRaw(buf);
                     }
                 }
@@ -2566,7 +2565,7 @@ public:
             }
             Application::Yield();
         }
-        return parseJsonToAny(jsonResult, returnType);
+        return comphelper::parseJsonToAny(jsonResult, returnType);
     }
 
     void SAL_CALL setValue(OUString const&, cpo::uno::Any const&) override {}
